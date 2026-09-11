@@ -49,6 +49,7 @@ async function desktopPass() {
   check('2 gauges rendered', await page.locator('.gauge-card').count() === 2);
   check('7 station rows rendered', await page.locator('.station-row').count() === 7);
   check('map legend visible', await page.locator('.legend').first().isVisible());
+  check('map legend calls out relay/relief drones explicitly', (await page.locator('.legend').first().innerText()).toLowerCase().includes('relay drone online'));
   check('damage heat map legend visible', await page.locator('.damage-legend').isVisible());
   check('damage heat map canvas rendered', await page.locator('#mapDiv canvas').count() > 0);
 
@@ -92,6 +93,7 @@ async function desktopPass() {
   // .innerText() reflects rendered text, and .card h3 is CSS text-transform:uppercase — compare case-insensitively.
   check('case detail shows damage assessment heat map', (await page.locator('#tab-p1').innerText()).toLowerCase().includes('damage / infrastructure assessment'));
   check('phase 1 jargon terms have plain-language tooltips', await page.locator('#tab-p1 .info-chip .info-tooltip').count() > 0);
+  check('damage heat map shows per-station labels, not just unlabeled blobs', await page.locator('#tab-p1 .card').last().innerText().then(t => /[A-Z]{3}\s+\d+\.\d/.test(t)));
   check('case impact snapshot shows response-speed stats', await page.locator('#caseImpactStrip .impact-stat').count() === 4);
 
   await page.locator('.tab[data-tab="p2"]').click();
@@ -99,12 +101,14 @@ async function desktopPass() {
   const p2Text = (await page.locator('#tab-p2').innerText()).toLowerCase();
   check('phase 2 shows connectivity restoration', p2Text.includes('connectivity restoration'));
   check('phase 2 shows search & rescue', p2Text.includes('search') && p2Text.includes('survivors found'));
+  check('phase 2 explains network extender drones in plain language', p2Text.includes('network extender drones'));
 
   await page.locator('.tab[data-tab="p3"]').click();
   await page.waitForTimeout(100);
   const p3Text = (await page.locator('#tab-p3').innerText()).toLowerCase();
   check('phase 3 shows medical supply delivery', p3Text.includes('medical supply delivery'));
   check('phase 3 shows relief sorties', p3Text.includes('relief sorties') && p3Text.includes('kg total aid delivered'));
+  check('phase 3 explains medical/heavy payload drones in plain language', p3Text.includes('medical supply drone') && p3Text.includes('heavy payload'));
   await page.locator('.tab[data-tab="p2"]').click();
   await page.waitForTimeout(100);
 

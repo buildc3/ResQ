@@ -199,6 +199,8 @@ header.topbar{display:flex;align-items:center;gap:24px;padding:0 20px;height:52p
 .tab.active{color:var(--text);border-color:var(--accent)}
 .tab-content{padding:22px 26px 40px;display:none}
 .tab-content.active{display:block}
+.phase-explainer{font-size:12.5px;line-height:1.6;color:var(--text-dim);max-width:760px;margin:0 0 16px;padding:11px 14px;background:var(--panel-2);border:1px solid var(--border-soft);border-left:3px solid var(--accent);border-radius:7px}
+.phase-explainer strong{color:var(--text);font-weight:700}
 .dgrid{display:grid;grid-template-columns:1.4fr 1fr;gap:16px}
 @media (max-width:900px){.dgrid{grid-template-columns:1fr}}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px}

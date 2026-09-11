@@ -1117,6 +1117,13 @@ function renderPhase2Tab(c, p2){
   ).join('');
 
   document.getElementById('tab-p2').innerHTML = `
+    <p class="phase-explainer">
+      <strong>Network Extender drones</strong> deploy one hop at a time — daisy-chaining outward from the edge of the
+      still-working network into the disaster corridor — until connectivity is fully restored to every affected
+      station. <strong>Search &amp; rescue teams</strong> sweep each affected zone for survivors in parallel, independent
+      of network status. Restoring the network is what unlocks Phase 3: relief can't dispatch to a zone until that
+      zone's own relay is online.
+    </p>
     <div class="dgrid">
       <div class="card">
         <h3>Connectivity Restoration</h3>
@@ -1155,6 +1162,12 @@ function renderPhase3Tab(c, p3){
   }).join('');
 
   document.getElementById('tab-p3').innerHTML = `
+    <p class="phase-explainer">
+      The instant a zone's relay comes online in Phase 2, a small <strong>Medical Supply drone</strong> makes one
+      precision delivery there — connectivity first, then relief, in the same operation. <strong>Heavy Payload
+      drones</strong> then run repeat resupply sorties (food, water, blankets) roughly every 20-30 hours for as long
+      as the response continues, for sustained multi-day aid rather than a single drop.
+    </p>
     <div class="dgrid">
       <div class="card">
         <h3>Medical Supply Delivery</h3>
@@ -1229,20 +1242,47 @@ function damageAssessmentCardHtml(damageByStation){
   const lats = STATIONS.map(s=>s.lat), lons = STATIONS.map(s=>s.lon);
   const latMin = Math.min(...lats), latMax = Math.max(...lats);
   const lonMin = Math.min(...lons), lonMax = Math.max(...lons);
-  const blobs = STATIONS.map(s=>{
+  const shortCode = (name) => name.slice(0,3).toUpperCase();
+
+  const layers = STATIONS.map(s=>{
     const v = damageByStation[s.id] ?? 0;
     const xPct = ((s.lon-lonMin)/((lonMax-lonMin)||1))*100;
     const yPct = (1-(s.lat-latMin)/((latMax-latMin)||1))*100; // invert so north is up
     const size = 34 + v*9;
-    return `<div title="${s.name}: ${v.toFixed(1)}" style="position:absolute;left:${xPct}%;top:${yPct}%;width:${size}px;height:${size}px;transform:translate(-50%,-50%);border-radius:50%;background:${damageColor(v)};filter:blur(11px);opacity:0.9"></div>`;
+    const glow = `<div style="position:absolute;left:${xPct}%;top:${yPct}%;width:${size}px;height:${size}px;transform:translate(-50%,-50%);border-radius:50%;background:${damageColor(v)};filter:blur(11px);opacity:0.9"></div>`;
+    // Exact station position (a solid dot) plus an always-visible label —
+    // the blurred glow alone reads as an unlabeled abstract painting to
+    // anyone who hasn't hovered over it, so the number/name is never hidden
+    // behind an interaction.
+    const dot = `<div style="position:absolute;left:${xPct}%;top:${yPct}%;width:7px;height:7px;transform:translate(-50%,-50%);border-radius:50%;background:${damageColor(v)};border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);z-index:2"></div>`;
+    const labelBelow = yPct < 78;
+    // Clamp the label's horizontal anchor near the left/right edges instead
+    // of always centering it on the marker — a centered label on an
+    // edge-hugging station (real geography puts several right at the box
+    // border) would otherwise render half off-canvas, invisible under
+    // overflow:hidden.
+    const xAnchor = xPct < 12 ? '0%' : xPct > 88 ? '-100%' : '-50%';
+    const label = `<div title="${s.name}: ${v.toFixed(1)} / 10" style="position:absolute;left:${xPct}%;top:${yPct}%;transform:translate(${xAnchor}, ${labelBelow ? '6px' : '-100%'});margin-top:${labelBelow?'6px':'-6px'};z-index:3;font-family:var(--mono);font-size:9.5px;font-weight:700;white-space:nowrap;background:rgba(20,24,30,.72);color:#fff;padding:2px 5px;border-radius:4px;letter-spacing:.02em">${shortCode(s.name)} ${v.toFixed(1)}</div>`;
+    return glow + dot + label;
   }).join('');
+
   return `
     <div class="card" style="grid-column:1/-1">
       <h3>Damage / Infrastructure Assessment (simulated CV pass)</h3>
-      <div style="position:relative;width:100%;max-width:420px;height:200px;background:var(--panel-2);border-radius:8px;overflow:hidden">${blobs}</div>
+      <p style="font-size:12px;color:var(--text-dim);line-height:1.55;margin:2px 0 12px;max-width:620px">
+        Stands in for a computer-vision pass over post-disaster aerial/satellite imagery: each station's surroundings
+        get a structural-damage severity score from <strong>0</strong> (minimal) to <strong>10</strong> (severe), read
+        directly from that station's own raw sensor intensity. This is deliberately a separate signal from the
+        detection probability above — that one asks "is this statistically anomalous," this one asks
+        "how physically severe does it look on the ground."
+      </p>
+      <div style="position:relative;width:100%;max-width:420px;height:210px;background:var(--panel-2);border:1px solid var(--border-soft);border-radius:8px;overflow:hidden">
+        <div style="position:absolute;top:8px;left:10px;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--text-faint);z-index:3">N ↑</div>
+        ${layers}
+      </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11px;color:var(--text-dim)">
         <span>0</span><div class="damage-scale-bar" style="flex:none"></div><span>10</span>
-        <span style="margin-left:10px">Per-tower severity at time of detection — from raw sensor intensity, independent of the detection probability above.</span>
+        <span style="margin-left:10px">Labels show each station's 3-letter code and severity at time of detection — hover a marker for the full name.</span>
       </div>
     </div>`;
 }
