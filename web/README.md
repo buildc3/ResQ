@@ -38,7 +38,9 @@ npm run generate-data   # tsx pipeline/build.ts
 npm run typecheck       # tsc --noEmit
 ```
 
-Generation and detection run on the same in-memory arrays in a single process — no intermediate CSV/debug files, no round-trip. The pipeline emits exactly the JSON files the frontend fetches, nothing else. Trigger timestamps are fixed given the seeded event schedule (`2023-10-04T01:20:00` cloudburst, `2023-10-04T09:15:12` earthquake), so a rebuild is always reproducible.
+Generation and detection run on the same in-memory arrays in a single process — no intermediate CSV/debug files, no round-trip. The pipeline emits exactly the JSON files the frontend fetches, nothing else. Trigger timestamps are fixed given the seeded event schedule (`2023-10-04T01:20:00` cloudburst, `2023-10-04T09:15:19` earthquake), so a rebuild is always reproducible.
+
+**Adaptive per-station thresholds**: both detectors calibrate their own anomaly threshold per station instead of applying one hand-picked global constant to every station. The cloudburst sigmoid midpoint and the earthquake STA/LTA trigger ratio are each derived from that station's own reading during a stretch of the timeline guaranteed quiet for every station (well before any injected rain/tremor/water-level event for cloudburst, hours before the mainshock for earthquake) — a station with a naturally noisier baseline needs a bigger anomaly to mean the same thing as a calmer one, rather than every station sharing one number tuned for the average case. See `ADAPT_SIGMA_MULT`/`MIN_SIGMOID_MIDPOINT`/`CALIBRATION_END_IDX` in `cloudburst.ts` and `ADAPT_SIGMA_MULT`/`MIN_TRIGGER_RATIO`/`CALIBRATION_END_SECONDS` in `earthquake.ts`. Each station's calibrated value is included in `model_params` (`adaptive_sigmoid_midpoint_by_station` / `adaptive_trigger_ratio_by_station`) for transparency.
 
 ## Local dev
 

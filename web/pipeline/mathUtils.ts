@@ -93,6 +93,20 @@ export function sigmoid(x: number, k = 1): number {
   return 1 / (1 + Math.exp(-k * x));
 }
 
+/**
+ * Plain (non-rolling) sample standard deviation of a fixed array — used for
+ * one-off per-station calibration over a known-quiet stretch of the
+ * timeline, as opposed to rollingMeanStd's continuously-updating trailing
+ * window used for live scoring.
+ */
+export function sampleStd(values: number[]): number {
+  const n = values.length;
+  if (n === 0) return 0;
+  const mean = values.reduce((a, b) => a + b, 0) / n;
+  const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / n;
+  return Math.sqrt(variance);
+}
+
 /** Slowly-varying mean-reverting noise (used for e.g. soil moisture). */
 export function ar1Series(n: number, mean: number, phi: number, sigma: number, rng: SeededRng): number[] {
   const x = new Array<number>(n);

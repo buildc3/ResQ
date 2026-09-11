@@ -7,7 +7,7 @@
  */
 import { SeededRng } from './rng.js';
 import { STATIONS, EARTHQUAKE_EPICENTER, SIM_START, SIM_END } from './stations.js';
-import { timeGridMs, formatNaiveIso, parseNaiveIso, haversineKm, dampedSineBurst, rollingMeanStd, sigmoid } from './mathUtils.js';
+import { timeGridMs, formatNaiveIso, parseNaiveIso, haversineKm, dampedSineBurst, rollingMeanStd, sigmoid, sampleStd } from './mathUtils.js';
 import type { FramePayload, ProbFramePayload } from './cloudburst.js';
 
 const SEED = 7;
@@ -23,8 +23,17 @@ const AMBIENT_NOISE_STD = 0.02;
 const STA_SAMPLES = 10; // 10s at 1Hz — see data-pipeline/README.md #3 for why not 2s
 const LTA_SAMPLES = 60; // 60s
 const SIGMOID_K = 1.5;
-const TRIGGER_RATIO = 4.0;
 const TRIGGER_PROB = 0.8;
+
+// Adaptive per-station trigger ratio, instead of one hand-picked global
+// value applied identically to every station. Calibrated from each
+// station's own STA/LTA ratio during a stretch of the timeline guaranteed
+// quiet for every station (hours before the mainshock, let alone any
+// aftershock) — a station with a noisier ambient ratio needs a bigger jump
+// to mean the same thing as a calmer one.
+const CALIBRATION_END_SECONDS = 3 * 3600; // 3h of 1Hz samples, well before ORIGIN_TIME for every station
+const ADAPT_SIGMA_MULT = 6.0; // threshold = quiet-period mean ratio + this many std-devs
+const MIN_TRIGGER_RATIO = 2.0; // floor: an unrealistically calm calibration window shouldn't make a station oversensitive
 const MIN_STATIONS = 2;
 const CONFIRM_WINDOW_MS = 30 * 1000;
 const FRAME_STEP_SECONDS = 10 * 60;
@@ -103,6 +112,7 @@ export function runEarthquake() {
   const stationAmp: Record<string, Float64Array> = {};
   const stationProb: Record<string, Float64Array> = {};
   const stationDistance: Record<string, number> = {};
+  const triggerRatioByStation: Record<string, number> = {};
 
   for (const s of STATIONS) {
     const distanceKm = haversineKm(s.lat, s.lon, EARTHQUAKE_EPICENTER.lat, EARTHQUAKE_EPICENTER.lon);
@@ -112,11 +122,20 @@ export function runEarthquake() {
 
     const { mean: sta } = rollingMeanStd(Array.from(amp), STA_SAMPLES, STA_SAMPLES);
     const { mean: lta } = rollingMeanStd(Array.from(amp), LTA_SAMPLES, LTA_SAMPLES);
-    const prob = new Float64Array(n);
+    const ratio = new Float64Array(n);
     for (let i = 0; i < n; i++) {
-      const ratio = Number.isNaN(sta[i]) || Number.isNaN(lta[i]) || lta[i] === 0 ? 0 : sta[i] / lta[i];
-      prob[i] = sigmoid(ratio - TRIGGER_RATIO, SIGMOID_K);
+      ratio[i] = Number.isNaN(sta[i]) || Number.isNaN(lta[i]) || lta[i] === 0 ? 0 : sta[i] / lta[i];
     }
+
+    const calibStart = LTA_SAMPLES; // warm-up before the ratio is meaningful
+    const calibEnd = Math.min(n, CALIBRATION_END_SECONDS);
+    const quietRatios = Array.from(ratio.slice(calibStart, calibEnd));
+    const quietMean = quietRatios.reduce((a, b) => a + b, 0) / quietRatios.length;
+    const adaptiveThreshold = Math.max(MIN_TRIGGER_RATIO, quietMean + ADAPT_SIGMA_MULT * sampleStd(quietRatios));
+    triggerRatioByStation[s.id] = Math.round(adaptiveThreshold * 1000) / 1000;
+
+    const prob = new Float64Array(n);
+    for (let i = 0; i < n; i++) prob[i] = sigmoid(ratio[i] - adaptiveThreshold, SIGMOID_K);
     stationProb[s.id] = prob;
   }
 
@@ -173,10 +192,13 @@ export function runEarthquake() {
     sta_samples: STA_SAMPLES,
     lta_samples: LTA_SAMPLES,
     sigmoid_k: SIGMOID_K,
-    trigger_ratio: TRIGGER_RATIO,
     trigger_probability: TRIGGER_PROB,
     min_confirming_stations: MIN_STATIONS,
     confirm_window_seconds: CONFIRM_WINDOW_MS / 1000,
+    adapt_sigma_multiplier: ADAPT_SIGMA_MULT,
+    calibration_window_seconds: CALIBRATION_END_SECONDS,
+    min_trigger_ratio: MIN_TRIGGER_RATIO,
+    adaptive_trigger_ratio_by_station: triggerRatioByStation,
   };
 
   const result: DetectionResultEarthquake = { scenario: 'earthquake', model: 'sta_lta_multistation', params, triggered: confirmed !== null };

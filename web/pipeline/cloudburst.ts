@@ -7,7 +7,7 @@
  */
 import { SeededRng } from './rng.js';
 import { STATIONS, SIM_START, SIM_END, type Station } from './stations.js';
-import { timeGridMs, formatNaiveIso, parseNaiveIso, gaussianBump, riseAndRecede, rollingZ, sigmoid } from './mathUtils.js';
+import { timeGridMs, formatNaiveIso, parseNaiveIso, gaussianBump, riseAndRecede, rollingZ, sigmoid, sampleStd } from './mathUtils.js';
 
 const STEP_MINUTES = 10;
 const SEED = 42;
@@ -26,8 +26,18 @@ const TREMOR_WIDTH_HOURS = 0.15;
 const BASELINE_WINDOW = 144; // 24h at 10-min resolution
 const MIN_PERIODS = 12; // 2h
 const SIGMOID_K = 0.8;
-const SIGMOID_MIDPOINT = 2.5;
 const TRIGGER_PROB = 0.8;
+
+// Adaptive per-station sigmoid midpoint, instead of one hand-picked global
+// value applied identically to every station regardless of how noisy that
+// station's own baseline actually is. Calibrated from each station's own
+// composite z-score during a stretch of the timeline guaranteed quiet for
+// every station (well before the earliest rain/tremor/water-level event
+// onset for any of them) — a station with a jitterier natural baseline
+// needs a larger anomaly to mean the same thing as a calmer one.
+const CALIBRATION_END_IDX = 180; // ~30h — before any injected event affects any station
+const ADAPT_SIGMA_MULT = 3.0; // midpoint = this many quiet-period std-devs above zero
+const MIN_SIGMOID_MIDPOINT = 1.2; // floor: an unrealistically silent calibration window shouldn't make a station oversensitive
 const CONFIRM_SAMPLES = 3; // 30 minutes sustained
 const WEIGHTS_WITH_LEVEL = { rainfall: 0.3, waterLevelRate: 0.5, tremor: 0.2 };
 const WEIGHTS_NO_LEVEL = { rainfall: 0.6, tremor: 0.4 };
@@ -95,7 +105,12 @@ function buildStationSeries(station: Station, timesMs: number[], rng: SeededRng)
   return { station, rainfall, waterLevel, groundTremor };
 }
 
-function stationProbability(s: StationSeries): number[] {
+function adaptiveMidpoint(composite: number[]): number {
+  const quiet = composite.slice(MIN_PERIODS, CALIBRATION_END_IDX);
+  return Math.max(MIN_SIGMOID_MIDPOINT, ADAPT_SIGMA_MULT * sampleStd(quiet));
+}
+
+function stationProbability(s: StationSeries): { probability: number[]; sigmoidMidpoint: number } {
   const zRain = rollingZ(s.rainfall, BASELINE_WINDOW, MIN_PERIODS, MIN_STD.rainfall).map((v) => Math.max(0, v));
   const zTremor = rollingZ(s.groundTremor, BASELINE_WINDOW, MIN_PERIODS, MIN_STD.tremor).map((v) => Math.max(0, v));
 
@@ -110,7 +125,8 @@ function stationProbability(s: StationSeries): number[] {
   } else {
     composite = zRain.map((z, i) => WEIGHTS_NO_LEVEL.rainfall * z + WEIGHTS_NO_LEVEL.tremor * zTremor[i]);
   }
-  return composite.map((z) => sigmoid(z - SIGMOID_MIDPOINT, SIGMOID_K));
+  const midpoint = adaptiveMidpoint(composite);
+  return { probability: composite.map((z) => sigmoid(z - midpoint, SIGMOID_K)), sigmoidMidpoint: midpoint };
 }
 
 export interface DetectionResultCloudburst {
@@ -142,7 +158,12 @@ export function runCloudburst() {
   const rng = new SeededRng(SEED);
   const series = STATIONS.map((s) => buildStationSeries(s, timesMs, rng));
   const probByStation: Record<string, number[]> = {};
-  for (const s of series) probByStation[s.station.id] = stationProbability(s);
+  const midpointByStation: Record<string, number> = {};
+  for (const s of series) {
+    const { probability, sigmoidMidpoint } = stationProbability(s);
+    probByStation[s.station.id] = probability;
+    midpointByStation[s.station.id] = Math.round(sigmoidMidpoint * 1000) / 1000;
+  }
 
   const frames: FramePayload[] = timesMs.map((t, i) => {
     const stationsPayload: Record<string, Record<string, number | null>> = {};
@@ -184,11 +205,14 @@ export function runCloudburst() {
     baseline_window_samples: BASELINE_WINDOW,
     min_periods: MIN_PERIODS,
     sigmoid_k: SIGMOID_K,
-    sigmoid_midpoint: SIGMOID_MIDPOINT,
     trigger_probability: TRIGGER_PROB,
     confirm_samples: CONFIRM_SAMPLES,
     weights_with_water_level: WEIGHTS_WITH_LEVEL,
     weights_without_water_level: WEIGHTS_NO_LEVEL,
+    adapt_sigma_multiplier: ADAPT_SIGMA_MULT,
+    calibration_window_samples: CALIBRATION_END_IDX,
+    min_sigmoid_midpoint: MIN_SIGMOID_MIDPOINT,
+    adaptive_sigmoid_midpoint_by_station: midpointByStation,
   };
 
   const result: DetectionResultCloudburst = { scenario: 'cloudburst_glof', model: 'rolling_zscore_fusion', params, triggered: triggerIdx >= 0 };
