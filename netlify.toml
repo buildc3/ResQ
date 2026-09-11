@@ -3,6 +3,16 @@
   publish = "."
   command = "npm run build"
 
+[build.environment]
+  # Pin to what's actually been tested, rather than whatever Netlify's
+  # platform default happens to be.
+  NODE_VERSION = "20"
+  # Playwright is a devDependency used only by the local QA suite (npm run
+  # qa) — never during this build — but its own install step downloads a
+  # Chromium binary by default. Skip that; it has nothing to do with the
+  # deployed site and would otherwise slow every deploy for no reason.
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+
 [[headers]]
   for = "/data/*"
   [headers.values]
