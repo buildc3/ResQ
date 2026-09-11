@@ -91,6 +91,14 @@ async function desktopPass() {
   check('phase 2 shows connectivity restoration', p2Text.includes('connectivity restoration'));
   check('phase 2 shows search & rescue', p2Text.includes('search') && p2Text.includes('survivors found'));
 
+  await page.locator('.tab[data-tab="p3"]').click();
+  await page.waitForTimeout(100);
+  const p3Text = (await page.locator('#tab-p3').innerText()).toLowerCase();
+  check('phase 3 shows medical supply delivery', p3Text.includes('medical supply delivery'));
+  check('phase 3 shows relief sorties', p3Text.includes('relief sorties') && p3Text.includes('kg total aid delivered'));
+  await page.locator('.tab[data-tab="p2"]').click();
+  await page.waitForTimeout(100);
+
   // Phase 2 must keep updating live while the user is looking at it, not just
   // the instant the tab opens — start playback (transport bar is only reachable
   // from the Monitor view, but the render loop keeps running underneath
@@ -136,14 +144,23 @@ async function desktopPass() {
   check('survivor markers exist on the map', survivorCount > 0);
   check('all survivor markers found by end of timeline', survivorCount > 0 && survivorFoundCount === survivorCount);
 
+  const supplyCount = await page.locator('path.supply-marker').count();
+  const supplyDeliveredCount = await page.locator('path.supply-marker').evaluateAll(els => els.filter(e => getComputedStyle(e).opacity !== '0').length);
+  check('supply markers exist on the map', supplyCount > 0);
+  check('all supply markers delivered by end of timeline', supplyCount > 0 && supplyDeliveredCount === supplyCount);
+
   await page.locator('.nav-tab[data-view="cases"]').click();
   await page.waitForTimeout(150);
   await page.screenshot({ path: shot('06-both-cases') });
   check('both cases revealed by end of timeline', await page.locator('.case-row').count() === 2);
 
-  // By the end of the timeline both cases' Phase 2 work should be long done.
-  const phase2Segs = await page.locator('.case-row .phase-mini .seg').evaluateAll(els => els.map(e => e.className));
-  check('phase 2 shows done (not stuck pending) by end of timeline', phase2Segs.some(c => c.includes('done')));
+  // By the end of the timeline all three phase segments (1, 2, 3) on every
+  // visible case row should show done — checked per-row, per-segment, not
+  // just "some segment somewhere" across the whole table.
+  const rowSegClasses = await page.locator('.case-row').evaluateAll(rows =>
+    rows.map(r => Array.from(r.querySelectorAll('.phase-mini .seg')).map(e => e.className)));
+  check('all three phases show done on every case row by end of timeline',
+    rowSegClasses.length > 0 && rowSegClasses.every(segs => segs.length === 3 && segs.every(c => c.includes('done'))));
 
   await page.locator('.case-row').first().click();
   await page.waitForTimeout(150);
@@ -152,6 +169,16 @@ async function desktopPass() {
   await page.screenshot({ path: shot('07-phase2-complete') });
   const p2FinalText = await page.locator('#tab-p2').innerText();
   check('connectivity reaches 100% by end of timeline', p2FinalText.includes('100%'));
+
+  await page.locator('.tab[data-tab="p3"]').click();
+  await page.waitForTimeout(100);
+  await page.screenshot({ path: shot('08-phase3-complete') });
+  const p3FinalText = (await page.locator('#tab-p3').innerText()).toLowerCase();
+  const medMatch = p3FinalText.match(/(\d+)\s*\/\s*(\d+)\s*zones supplied/);
+  check('all medical deliveries complete by end of timeline', !!medMatch && medMatch[1] === medMatch[2] && Number(medMatch[2]) > 0);
+  const stepThreeClass = await page.locator('.step').nth(2).getAttribute('class');
+  check('stepper shows Phase 3 done (not stuck pending/active) by end of timeline', stepThreeClass.includes('done'));
+
   await page.locator('#backToCases').click();
   await page.waitForTimeout(100);
 

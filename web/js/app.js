@@ -183,6 +183,33 @@ function isSearchActiveAt(stationId, currentIso){
     z.station_id===stationId && currentIso>=z.search_start && currentIso<z.search_complete));
 }
 
+/* ---------- PHASE 3: MEDICAL & RELIEF DELIVERY (derived live from the timeline) ----------
+   Same architecture as Phase 2 — no detection model of its own, all live
+   state comes from comparing the current playhead against the real
+   dispatch/delivery schedule. Medical drones do one precision drop per zone;
+   Heavy Payload drones then run repeat resupply sorties for sustained,
+   multi-day aid, so "complete" here means every sortie *scheduled within
+   this simulation window* has landed — real relief would keep going past it. */
+function computePhase3(c, currentIso){
+  const meds = c.phase_3.medical_deliveries || [];
+  const sorties = c.phase_3.relief_sorties || [];
+
+  const medDelivered = meds.filter(m => currentIso >= m.delivered_at);
+  const medKg = medDelivered.reduce((sum,m)=>sum+m.payload_kg, 0);
+  const medAnyDispatched = meds.some(m => currentIso >= m.dispatched_at);
+
+  const sortiesDelivered = sorties.filter(s => currentIso >= s.delivered_at);
+  const sortiesKg = sortiesDelivered.reduce((sum,s)=>sum+s.payload_kg, 0);
+
+  const allMedDone = meds.length===0 || meds.every(m => currentIso >= m.delivered_at);
+  const allSortiesDone = sorties.length===0 || sorties.every(s => currentIso >= s.delivered_at);
+  let status = 'pending';
+  if(allMedDone && allSortiesDone) status = 'complete';
+  else if(medAnyDispatched || sortiesDelivered.length>0) status = 'active';
+
+  return {status, meds, medDelivered, medKg, sorties, sortiesDelivered, sortiesKg, totalKg: medKg+sortiesKg};
+}
+
 /* ---------- DAMAGE HEAT MAP COLOR ---------- */
 // Classic full-spectrum heat map ramp: green (low) -> yellow -> orange -> red (high),
 // matching standard heat-map convention (e.g. weather/density maps) rather than a
@@ -373,6 +400,50 @@ function updateSurvivorLayers(currentIso){
       if(!e.shown && currentIso >= e.found_at){
         e.marker.setStyle({fillOpacity:1});
         e.shown = true;
+      }
+    });
+  });
+}
+
+/* Phase 3 — one amber marker per affected station, appearing at its first
+   delivery (medical or heavy) and staying, with a live-updating tooltip
+   showing cumulative kg delivered so far (recomputed each tick since sorties
+   keep arriving over the following days). */
+let supplyState = {};
+function buildSupplyLayers(){
+  CASES.forEach(c=>{
+    const stationIds = new Set([
+      ...(c.phase_3.medical_deliveries||[]).map(m=>m.station_id),
+      ...(c.phase_3.relief_sorties||[]).map(s=>s.station_id),
+    ]);
+    const markers = {};
+    stationIds.forEach(id=>{
+      const st = STATION_LOOKUP[id];
+      // A hollow ring, not a filled dot — relay/survivor markers already sit
+      // at this exact position, and a same-size filled circle added after
+      // them would just paint over and hide them. A larger stroke-only ring
+      // surrounds whatever's already there instead of covering it.
+      const m = L.circleMarker([st.lat, st.lon], {radius:11, color:'#c98a1f', weight:2.5, fill:false, opacity:0, className:'supply-marker'});
+      m.bindTooltip('', {direction:'top', offset:[0,-8]});
+      m.addTo(leafMap);
+      markers[id] = m;
+    });
+    supplyState[c.case_id] = markers;
+  });
+}
+function updateSupplyLayers(currentIso){
+  CASES.forEach(c=>{
+    const markers = supplyState[c.case_id];
+    if(!markers) return;
+    const p3 = computePhase3(c, currentIso);
+    const kgByStation = {};
+    p3.medDelivered.forEach(m=> kgByStation[m.station_id] = (kgByStation[m.station_id]||0) + m.payload_kg);
+    p3.sortiesDelivered.forEach(s=> kgByStation[s.station_id] = (kgByStation[s.station_id]||0) + s.payload_kg);
+    Object.entries(markers).forEach(([stationId, marker])=>{
+      const kg = kgByStation[stationId];
+      if(kg){
+        marker.setStyle({opacity:1});
+        marker.setTooltipContent(`Supplies delivered: ${STATION_LOOKUP[stationId].name} — ${kg}kg so far`);
       }
     });
   });
@@ -608,6 +679,7 @@ function render(){
 
   updateRelayLayers(currentIso);
   updateSurvivorLayers(currentIso);
+  updateSupplyLayers(currentIso);
 
   // Keep whatever's currently on screen live during playback — otherwise
   // Phase 2's progress would only ever update the instant you first open it.
@@ -661,14 +733,16 @@ function renderCasesView(){
       <tbody>
         ${visibleCases.map(c=>{
           const sev = SEV_COLORS[c.severity.severity_label] || SEV_COLORS.moderate;
-          const p2 = computePhase2(c, FRAME_ISO[state.frameIndex]);
+          const currentIso = FRAME_ISO[state.frameIndex];
+          const p2 = computePhase2(c, currentIso);
+          const p3 = computePhase3(c, currentIso);
           return `<tr class="case-row" data-case="${c.case_id}">
             <td><div class="type-icon"><span class="shape"></span></div></td>
             <td>${c.title}</td>
             <td>${c.location.region_label}</td>
             <td style="font-family:var(--mono);color:var(--text-dim)">${formatLabel(c.detected_at)}</td>
             <td><span class="sev-badge" style="background:${sev.bg};color:${sev.fg}">${Math.round(c.severity.peak_probability*100)} — ${c.severity.severity_label.toUpperCase()}</span></td>
-            <td><div class="phase-mini"><span class="seg ${phaseSegClass(c.phase_1.status)}"></span><span class="seg ${phaseSegClass(p2.status)}"></span><span class="seg ${phaseSegClass(c.phase_3.status)}"></span></div></td>
+            <td><div class="phase-mini"><span class="seg ${phaseSegClass(c.phase_1.status)}"></span><span class="seg ${phaseSegClass(p2.status)}"></span><span class="seg ${phaseSegClass(p3.status)}"></span></div></td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -707,6 +781,7 @@ function refreshOpenCaseDetail(){
 function renderCaseDetail(c){
   const currentIso = FRAME_ISO[state.frameIndex];
   const p2 = computePhase2(c, currentIso);
+  const p3 = computePhase3(c, currentIso);
 
   document.getElementById('detailTitle').textContent = c.title;
   document.getElementById('detailDetected').textContent = 'Detected '+formatLabel(c.detected_at);
@@ -716,7 +791,7 @@ function renderCaseDetail(c){
   const phases = [
     {n:1, label:'Detection & Surveillance', status:c.phase_1.status},
     {n:2, label:'Search & Connectivity', status:p2.status},
-    {n:3, label:'Relief Delivery', status:c.phase_3.status},
+    {n:3, label:'Relief Delivery', status:p3.status},
   ];
   document.getElementById('stepper').innerHTML = phases.map((p,i)=>{
     const cls = stepClass(p.status);
@@ -727,11 +802,7 @@ function renderCaseDetail(c){
 
   renderPhase1Tab(c);
   renderPhase2Tab(c, p2);
-  document.getElementById('tab-p3').innerHTML = `
-    <div class="placeholder-shell">
-      <div class="tag">Phase 3 · Status: ${c.phase_3.status}</div>
-      Dispatch status, sorties completed, and supplies delivered vs. pending will render here once Phase 3 simulation is implemented.
-    </div>`;
+  renderPhase3Tab(c, p3);
 
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===state.activeDetailTab));
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.toggle('active', t.id==='tab-'+state.activeDetailTab));
@@ -765,6 +836,43 @@ function renderPhase2Tab(c, p2){
         <h3>Search &amp; Rescue</h3>
         <div class="p2-metric">${p2.survivorsFound} <span class="p2-metric-sub">/ ${p2.totalSurvivors} survivors found</span></div>
         <div class="fired-list" style="margin-top:14px">${zoneRows || '<span style="color:var(--text-faint);font-size:12px">No search zones for this case.</span>'}</div>
+      </div>
+    </div>`;
+}
+
+function renderPhase3Tab(c, p3){
+  const medRows = p3.meds.map(m=>{
+    const delivered = p3.medDelivered.includes(m);
+    const name = STATION_LOOKUP[m.station_id].name;
+    const label = delivered
+      ? `delivered ${formatLabel(m.delivered_at)} · ${m.payload_kg}kg`
+      : `en route since ${formatLabel(m.dispatched_at)} · ${m.payload_kg}kg`;
+    return `<div class="fired-row"><span class="n">${delivered?'✓':'○'} ${name}</span><span class="v">${label}</span></div>`;
+  }).join('');
+
+  const byStation = {};
+  p3.sorties.forEach(s=>{ (byStation[s.station_id] ??= []).push(s); });
+  const sortieRows = Object.entries(byStation).map(([stationId, sorties])=>{
+    const delivered = sorties.filter(s=>p3.sortiesDelivered.includes(s));
+    const name = STATION_LOOKUP[stationId].name;
+    const next = sorties.find(s=>!p3.sortiesDelivered.includes(s));
+    const label = next
+      ? `${delivered.length}/${sorties.length} sorties · next ${formatLabel(next.dispatched_at)}`
+      : `${delivered.length}/${sorties.length} sorties · last delivered ${formatLabel(sorties[sorties.length-1].delivered_at)}`;
+    return `<div class="fired-row"><span class="n">${delivered.length===sorties.length?'✓':'◐'} ${name}</span><span class="v">${label}</span></div>`;
+  }).join('');
+
+  document.getElementById('tab-p3').innerHTML = `
+    <div class="dgrid">
+      <div class="card">
+        <h3>Medical Supply Delivery</h3>
+        <div class="p2-metric">${p3.medDelivered.length} <span class="p2-metric-sub">/ ${p3.meds.length} zones supplied</span></div>
+        <div class="fired-list" style="margin-top:14px">${medRows || '<span style="color:var(--text-faint);font-size:12px">No medical deliveries scheduled for this case.</span>'}</div>
+      </div>
+      <div class="card">
+        <h3>Relief Sorties (Heavy Payload)</h3>
+        <div class="p2-metric">${p3.totalKg} <span class="p2-metric-sub">kg total aid delivered</span></div>
+        <div class="fired-list" style="margin-top:14px">${sortieRows || '<span style="color:var(--text-faint);font-size:12px">No relief sorties scheduled for this case.</span>'}</div>
       </div>
     </div>`;
 }
@@ -875,6 +983,7 @@ async function init(){
     buildMap();
     buildRelayLayers();
     buildSurvivorLayers();
+    buildSupplyLayers();
     const probPanel = document.getElementById('probPanel');
     gaugeFlood = buildGauge(probPanel, 'Cloudburst / Flood Risk');
     gaugeQuake = buildGauge(probPanel, 'Seismic Risk');

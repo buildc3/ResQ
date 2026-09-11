@@ -1,6 +1,6 @@
 # ResQ
 
-Phases 1 and 2 of a disaster-response system: synthetic sensor data for two Sikkim disaster scenarios, statistical detection models that turn sensor streams into a disaster probability (Phase 1 — Detection & Surveillance), simulated relay-deployment and search-and-rescue schedules once a disaster is detected (Phase 2 — Search & Connectivity), and a web UI that plays the whole thing back as a time-lapse.
+All three phases of a disaster-response system: synthetic sensor data for two Sikkim disaster scenarios, statistical detection models that turn sensor streams into a disaster probability (Phase 1 — Detection & Surveillance), simulated relay-deployment and search-and-rescue schedules once a disaster is detected (Phase 2 — Search & Connectivity), simulated medical delivery and repeat relief sorties once connectivity is restored (Phase 3 — Medical & Relief Delivery), and a web UI that plays the whole thing back as a time-lapse.
 
 **100% JavaScript/TypeScript, one Netlify-deployable package.** Data generation, the detection models, and the UI all live in `web/` and run on Node — no Python, no separate services, nothing to keep in sync by hand.
 
@@ -33,5 +33,7 @@ To deploy: push to a git remote and connect the repo in Netlify — `netlify.tom
 ## Scope
 
 - **Phase 1 (Detection & Surveillance)** — complete: sensor fusion → probability → case creation, plus a simulated damage/infrastructure heat map.
-- **Phase 2 (Search & Connectivity)** — complete: relay-deployment daisy-chain and search-and-rescue sweeps, fully simulated and driven live off the timeline (not a placeholder).
-- **Phase 3 (Relief Delivery)** — not started; represented as an explicit pending placeholder in the Case model and UI.
+- **Phase 2 (Search & Connectivity)** — complete: relay-deployment daisy-chain and search-and-rescue sweeps, fully simulated and driven live off the timeline.
+- **Phase 3 (Medical & Relief Delivery)** — complete: medical delivery dispatched the moment each zone's connectivity is restored, plus repeat heavy-payload resupply sorties for sustained multi-day aid — same live-derived-from-the-timeline architecture as Phase 1/2, not a placeholder.
+
+All three phases are fully simulated end to end; none of it is mock/static content — every status, percentage, and map marker is derived by comparing the current playhead position against real generated schedules.

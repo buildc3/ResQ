@@ -8,6 +8,7 @@ import { STATION_LOOKUP } from './stations.js';
 import type { DetectionResultCloudburst } from './cloudburst.js';
 import type { DetectionResultEarthquake } from './earthquake.js';
 import type { Phase2Plan } from './phase2.js';
+import type { Phase3Plan } from './phase3.js';
 
 function severityLabel(probability: number): 'critical' | 'high' | 'moderate' {
   if (probability >= 0.95) return 'critical';
@@ -15,7 +16,7 @@ function severityLabel(probability: number): 'critical' | 'high' | 'moderate' {
   return 'moderate';
 }
 
-export function buildCloudburstCase(result: DetectionResultCloudburst, phase2: Phase2Plan) {
+export function buildCloudburstCase(result: DetectionResultCloudburst, phase2: Phase2Plan, phase3: Phase3Plan) {
   if (!result.triggered) return null;
   const primary = STATION_LOOKUP[result.primaryStation!];
   const contributing = result.contributingStations!;
@@ -60,11 +61,14 @@ export function buildCloudburstCase(result: DetectionResultCloudburst, phase2: P
       connectivity_complete_at: phase2.connectivity_complete_at,
       search_complete_at: phase2.search_complete_at,
     },
-    phase_3: { status: 'pending', medical_dispatch: null, relief_dispatch: null },
+    phase_3: {
+      medical_deliveries: phase3.medical_deliveries,
+      relief_sorties: phase3.relief_sorties,
+    },
   };
 }
 
-export function buildEarthquakeCase(result: DetectionResultEarthquake, phase2: Phase2Plan) {
+export function buildEarthquakeCase(result: DetectionResultEarthquake, phase2: Phase2Plan, phase3: Phase3Plan) {
   if (!result.triggered) return null;
   const epicenter = result.estimatedEpicenter!;
   const confirming = result.confirmingStations!;
@@ -102,6 +106,9 @@ export function buildEarthquakeCase(result: DetectionResultEarthquake, phase2: P
       connectivity_complete_at: phase2.connectivity_complete_at,
       search_complete_at: phase2.search_complete_at,
     },
-    phase_3: { status: 'pending', medical_dispatch: null, relief_dispatch: null },
+    phase_3: {
+      medical_deliveries: phase3.medical_deliveries,
+      relief_sorties: phase3.relief_sorties,
+    },
   };
 }
