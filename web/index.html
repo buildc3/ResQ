@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sikkim Disaster Detection Monitor</title>
+<meta name="description" content="Real-time disaster detection monitor for Sikkim — cloudburst/GLOF and earthquake sensor fusion, live probability tracking, and case management.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23eef2f6'/%3E%3Crect x='11' y='11' width='10' height='10' fill='%231d6fa5' transform='rotate(45 16 16)'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="loadingOverlay" class="state-overlay">
+  <div class="state-box">
+    <div class="spinner"></div>
+    <div class="state-title">Loading sensor network…</div>
+    <div class="state-sub">Fetching station data, sensor frames, and detection results</div>
+  </div>
+</div>
+<div id="errorOverlay" class="state-overlay" hidden>
+  <div class="state-box">
+    <div class="state-title" style="color:var(--red)">Couldn't load the data pipeline output</div>
+    <div class="state-sub" id="errorDetail">—</div>
+    <div class="state-sub">Make sure <code>data-pipeline/output</code> has been generated and synced (<code>npm run sync-data</code>).</div>
+    <button id="retryBtn" class="retry-btn">Retry</button>
+  </div>
+</div>
+<div id="app">
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark"></span><span class="brand-label">SENTINEL&nbsp;SIKKIM</span></div>
+    <nav class="nav-tabs">
+      <div class="nav-tab active" data-view="monitor">Monitor</div>
+      <div class="nav-tab" data-view="cases">Cases<span class="badge-count" id="casesBadge" style="display:none">0</span></div>
+    </nav>
+    <div class="topbar-right">
+      <div class="sys-status"><span class="sys-dot"></span><span class="sys-label">LIVE FEED NOMINAL</span></div>
+      <div class="clock" id="clock">—</div>
+    </div>
+  </header>
+
+  <div class="alert-banner" id="alertBanner">
+    <span class="dot"></span>
+    <span id="alertText">Alert</span>
+    <a href="#" id="alertLink">View case →</a>
+    <button id="alertDismiss">Dismiss</button>
+  </div>
+
+  <div id="toasts"></div>
+
+  <!-- MONITOR VIEW -->
+  <section class="view active" id="view-monitor">
+    <div class="monitor-body">
+      <div class="panel map-panel">
+        <div class="panel-head">Sikkim — Sensor Network</div>
+        <div class="map-wrap">
+          <div id="mapDiv"></div>
+          <div class="legend">
+            <div class="legend-row"><span class="legend-dot" style="background:var(--green)"></span>Normal</div>
+            <div class="legend-row"><span class="legend-dot" style="background:var(--amber)"></span>Elevated</div>
+            <div class="legend-row"><span class="legend-dot" style="background:var(--red)"></span>Critical</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel side-panel">
+        <div class="panel-head">Stations</div>
+        <div class="station-list" id="stationList"></div>
+        <div class="station-detail" id="stationDetail"></div>
+      </div>
+
+      <div class="panel prob-panel" id="probPanel"></div>
+    </div>
+
+    <div class="transport">
+      <button class="play" id="playBtn">▶</button>
+      <div class="speed-select" id="speedSelect">
+        <button data-speed="1" class="active">1×</button>
+        <button data-speed="10">10×</button>
+        <button data-speed="60">60×</button>
+      </div>
+      <div class="scrub-wrap">
+        <div class="scrub-track" id="scrubTrack">
+          <div class="scrub-fill" id="scrubFill"></div>
+          <div id="scrubMarkers"></div>
+          <div class="scrub-playhead" id="scrubPlayhead"></div>
+        </div>
+      </div>
+      <div class="time-range">Oct 2 00:00 → Oct 6 23:59</div>
+      <div class="time-label" id="timeLabel">Oct 2, 00:00</div>
+    </div>
+  </section>
+
+  <!-- CASES VIEW -->
+  <section class="view" id="view-cases">
+    <div class="cases-body">
+      <div class="cases-header"><h1>Cases</h1><span id="casesSub">0 active</span></div>
+      <div id="casesContent"></div>
+    </div>
+  </section>
+
+  <!-- CASE DETAIL VIEW -->
+  <section class="view" id="view-detail">
+    <div class="detail-body">
+      <div class="detail-header">
+        <div class="back-link" id="backToCases">← Back to Cases</div>
+        <div class="detail-title-row">
+          <h1 id="detailTitle">—</h1>
+          <span class="meta-chip" id="detailDetected">—</span>
+          <span class="meta-chip" id="detailType">—</span>
+          <span class="meta-chip" id="detailSeverity">—</span>
+        </div>
+      </div>
+      <div class="stepper" id="stepper"></div>
+      <div class="tabbar" id="tabbar">
+        <div class="tab active" data-tab="p1">Phase 1 — Detection &amp; Surveillance</div>
+        <div class="tab" data-tab="p2">Phase 2 — Search &amp; Connectivity</div>
+        <div class="tab" data-tab="p3">Phase 3 — Relief Delivery</div>
+      </div>
+      <div class="tab-content active" id="tab-p1"></div>
+      <div class="tab-content" id="tab-p2"></div>
+      <div class="tab-content" id="tab-p3"></div>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

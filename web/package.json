@@ -1,0 +1,24 @@
+{
+  "name": "resq-detection-monitor",
+  "version": "1.0.0",
+  "description": "Sikkim Disaster Detection Monitor — Phase 1 time-lapse UI for ResQ",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate-data": "tsx pipeline/build.ts",
+    "build": "npm run generate-data",
+    "dev": "npm run generate-data && serve -l 8000 .",
+    "typecheck": "tsc --noEmit",
+    "qa": "node qa/run.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "playwright": "^1.63.0",
+    "serve": "^14.2.3",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
