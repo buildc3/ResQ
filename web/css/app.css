@@ -79,7 +79,7 @@ header.topbar{display:flex;align-items:center;gap:24px;padding:0 20px;height:52p
 .damage-toggle{cursor:pointer;user-select:none}
 .damage-toggle input{margin:0;cursor:pointer}
 .damage-scale{display:flex;align-items:center;gap:5px}
-.damage-scale-bar{width:70px;height:8px;border-radius:3px;background:linear-gradient(to right, rgb(253,232,232), rgb(122,10,10))}
+.damage-scale-bar{width:70px;height:8px;border-radius:3px;background:linear-gradient(to right, rgb(46,168,90), rgb(190,210,60), rgb(250,210,40), rgb(250,140,30), rgb(220,30,30))}
 
 .station-list{display:flex;flex-direction:column}
 .station-row{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border-soft);cursor:pointer;font-size:12.5px}

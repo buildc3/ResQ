@@ -132,13 +132,30 @@ function frameIndexAtOrBefore(iso){
 }
 
 /* ---------- DAMAGE HEAT MAP COLOR ---------- */
-// 0-10 severity: light red (low) to heavy/deep red (high) — linear RGB lerp.
-const DAMAGE_LOW_RGB = [253, 232, 232];
-const DAMAGE_HIGH_RGB = [122, 10, 10];
+// Classic full-spectrum heat map ramp: green (low) -> yellow -> orange -> red (high),
+// matching standard heat-map convention (e.g. weather/density maps) rather than a
+// single-hue light-to-dark ramp.
+const SEVERITY_STOPS = [
+  { t: 0.00, rgb: [46, 168, 90] },   // green
+  { t: 0.35, rgb: [190, 210, 60] },  // yellow-green
+  { t: 0.55, rgb: [250, 210, 40] },  // yellow
+  { t: 0.75, rgb: [250, 140, 30] },  // orange
+  { t: 1.00, rgb: [220, 30, 30] },   // red
+];
+function severityRgb(t){
+  t = Math.max(0, Math.min(1, t));
+  for(let i=0;i<SEVERITY_STOPS.length-1;i++){
+    const a = SEVERITY_STOPS[i], b = SEVERITY_STOPS[i+1];
+    if(t>=a.t && t<=b.t){
+      const localT = (t-a.t)/(b.t-a.t || 1);
+      return a.rgb.map((v,ch)=> Math.round(v + (b.rgb[ch]-v)*localT));
+    }
+  }
+  return SEVERITY_STOPS[SEVERITY_STOPS.length-1].rgb;
+}
 function damageColor(value){
-  const t = Math.max(0, Math.min(1, value/10));
-  const rgb = DAMAGE_LOW_RGB.map((lo,i)=> Math.round(lo + (DAMAGE_HIGH_RGB[i]-lo)*t));
-  return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  const [r,g,b] = severityRgb(value/10);
+  return `rgb(${r},${g},${b})`;
 }
 
 /* ---------- LEAFLET MAP ---------- */
@@ -165,9 +182,20 @@ function buildMap(){
   HTMLCanvasElement.prototype.getContext = function(type, opts){
     return origGetContext.call(this, type, type==='2d' ? {...opts, willReadFrequently:true} : opts);
   };
+  // Full-coverage gradient wash (green -> yellow -> orange -> red), like a
+  // standard weather/density heat map — transparent only where there is
+  // truly zero influence from any station, opaque green immediately above that.
+  const heatGradient = {
+    0.0: 'rgba(46,168,90,0)',
+    0.05: 'rgb(46,168,90)',
+    0.35: 'rgb(190,210,60)',
+    0.55: 'rgb(250,210,40)',
+    0.75: 'rgb(250,140,30)',
+    1.0: 'rgb(220,30,30)',
+  };
   damageHeatLayer = L.heatLayer([], {
-    radius: 55, blur: 40, max: 2, minOpacity: 0,
-    gradient: {0.0:'rgba(253,232,232,0)', 0.15:'rgb(253,232,232)', 0.5:'rgb(211,140,140)', 1.0:'rgb(122,10,10)'},
+    radius: 140, blur: 100, max: 2, minOpacity: 0,
+    gradient: heatGradient,
   }).addTo(leafMap);
   HTMLCanvasElement.prototype.getContext = origGetContext;
 
