@@ -52,18 +52,23 @@ netlify.toml         build = "npm run build" (base: web) — Node only
 ```
 
 ```mermaid
-flowchart TD
-    subgraph BT["Build time — Node (npm run build)"]
-        PIPE["pipeline/*.ts"] --> GEN["Synthetic sensor generation\n(seeded, reproducible)"]
-        GEN --> DET["Detection models\n(z-score fusion / STA-LTA)"]
-        DET --> SCH["Phase 2 + Phase 3\nschedule generation"]
-        SCH --> JSON[("JSON files in web/data/")]
+flowchart LR
+    NETLIFY(["npm run build"]) --> PIPE
+
+    subgraph BT["Build time — Node"]
+        direction LR
+        PIPE["pipeline/*.ts"] --> GEN["Generate synthetic\nsensor data"]
+        GEN --> DET["Run detection models\nz-score fusion / STA-LTA"]
+        DET --> SCH["Generate Phase 2 + 3\nschedules"]
+        SCH --> DATA[("JSON\nweb/data/")]
     end
-    subgraph RT["Runtime — static frontend, no server"]
-        JSON --> UI["index.html / app.js / Leaflet"]
-        UI --> LOOP["Render loop:\ncompare current playhead\nto real timestamps"]
+
+    subgraph RT["Runtime — static frontend"]
+        direction LR
+        UI["index.html / app.js\n+ Leaflet"] --> LOOP{{"Render loop:\nplayhead vs. real timestamps"}}
     end
-    NETLIFY["Netlify build"] --> BT
+
+    DATA --> UI
 ```
 
 *"Live" means the UI re-derives its own state every frame from real timestamps — not a network connection. The frontend is static files reading pre-generated JSON.*
