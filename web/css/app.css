@@ -141,6 +141,18 @@ header.topbar{display:flex;align-items:center;gap:24px;padding:0 20px;height:52p
 .cases-header{display:flex;align-items:baseline;gap:10px;margin-bottom:16px}
 .cases-header h1{font-size:18px;margin:0}
 .cases-header span{font-size:12px;color:var(--text-dim);font-family:var(--mono)}
+
+/* Impact reinforcement: a live running total of what the response has
+   actually achieved so far, computed the same way every other live number
+   in this app is — never a static/marketing figure. */
+.impact-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:18px}
+.impact-strip[hidden]{display:none}
+.impact-stat{background:var(--panel);padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.impact-stat .val{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--text)}
+.impact-stat .val small{font-size:13px;font-weight:600;color:var(--text-faint)}
+.impact-stat .lbl{font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.03em}
+.case-impact-strip{margin:16px 26px 0;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+.impact-stat .val.pending{color:var(--text-faint);font-size:13px;font-weight:600}
 .cases-table{width:100%;border-collapse:collapse}
 .cases-table th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-faint);padding:8px 12px;border-bottom:1px solid var(--border)}
 .case-row{cursor:pointer}

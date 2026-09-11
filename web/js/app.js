@@ -92,6 +92,20 @@ function formatLabel(iso){
   const t = parseIso(iso);
   return `${MONTH_NAMES[t.mo-1]} ${t.d}, ${String(t.h).padStart(2,'0')}:${String(t.mi).padStart(2,'0')}`;
 }
+/* Duration-only arithmetic (never absolute display) — Date.UTC is used purely
+   as an arbitrary consistent integer axis to diff two naive timestamps,
+   exactly like the pipeline's own internal date math. */
+function minutesBetween(isoA, isoB){
+  const a = parseIso(isoA), b = parseIso(isoB);
+  const msA = Date.UTC(a.y, a.mo-1, a.d, a.h, a.mi);
+  const msB = Date.UTC(b.y, b.mo-1, b.d, b.h, b.mi);
+  return Math.round((msB-msA)/60000);
+}
+function formatDuration(minutes){
+  if(minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes/60), m = minutes%60;
+  return m===0 ? `${h}h` : `${h}h ${m}m`;
+}
 
 async function loadData(){
   const fetchJson = (name) => fetch(`${DATA_DIR}/${name}`).then(r=>{
@@ -892,10 +906,37 @@ function phaseSegClass(status){
   if(status==='active') return 'active';
   return '';
 }
+/** Aggregate, live-computed "what has actually been achieved so far" across
+    every revealed case — reinforces impact without inventing any number that
+    isn't already sitting in real per-case schedule data. */
+function renderImpactStrip(visibleCases, currentIso){
+  const strip = document.getElementById('impactStrip');
+  if(visibleCases.length===0){ strip.hidden = true; return; }
+  strip.hidden = false;
+
+  let survivorsFound=0, survivorsTotal=0, relaysDeployed=0, relaysTotal=0, kgDelivered=0, casesComplete=0;
+  visibleCases.forEach(c=>{
+    const p2 = computePhase2(c, currentIso);
+    const p3 = computePhase3(c, currentIso);
+    survivorsFound += p2.survivorsFound; survivorsTotal += p2.totalSurvivors;
+    relaysDeployed += p2.deployedRelays.length; relaysTotal += p2.deployedRelays.length + p2.pendingRelays.length;
+    kgDelivered += p3.totalKg;
+    if(c.phase_1.status==='complete' && p2.status==='complete' && p3.status==='complete') casesComplete++;
+  });
+
+  const stats = [
+    {val:`${survivorsFound}<small>/${survivorsTotal}</small>`, lbl:'Survivors found'},
+    {val:`${relaysDeployed}<small>/${relaysTotal}</small>`, lbl:'Relay drones deployed'},
+    {val:`${Math.round(kgDelivered)}<small>kg</small>`, lbl:'Relief delivered'},
+    {val:`${casesComplete}<small>/${visibleCases.length}</small>`, lbl:'Cases fully resolved'},
+  ];
+  strip.innerHTML = stats.map(s=>`<div class="impact-stat"><div class="val">${s.val}</div><div class="lbl">${s.lbl}</div></div>`).join('');
+}
 function renderCasesView(){
   const content = document.getElementById('casesContent');
   const visibleCases = CASES.filter(c=>state.revealedCases.has(c.case_id));
   document.getElementById('casesSub').textContent = `${visibleCases.length} active`;
+  renderImpactStrip(visibleCases, FRAME_ISO[state.frameIndex]);
   if(visibleCases.length===0){
     content.innerHTML = `<div class="empty-state"><div class="big">◎</div>No active cases — monitoring nominal.<br>Cases appear automatically when a disaster probability crosses threshold on the Monitor.</div>`;
     return;
@@ -988,6 +1029,34 @@ function nextMilestoneFor(c, currentIso){
   return candidates[0].text;
 }
 
+/** Real elapsed-time-since-detection metrics for a single case — how fast
+    the response actually moved, in its own generated schedule. Each stat
+    only appears once the timeline has actually reached it (never reveals a
+    future scheduled time early), same reveal discipline as everywhere else. */
+function renderCaseImpactStrip(c, currentIso){
+  const el = document.getElementById('caseImpactStrip');
+  const relays = c.phase_2.relay_schedule || [];
+  const firstRelay = relays.length ? relays.reduce((a,b)=> a.deploy_at<b.deploy_at?a:b) : null;
+  const allSurvivors = (c.phase_2.search_zones||[]).flatMap(z=>z.survivors||[]);
+  const firstSurvivor = allSurvivors.length ? allSurvivors.reduce((a,b)=> a.found_at<b.found_at?a:b) : null;
+  const meds = c.phase_3.medical_deliveries || [];
+  const firstMed = meds.length ? meds.reduce((a,b)=> a.delivered_at<b.delivered_at?a:b) : null;
+
+  const stat = (reachedAt, label) => {
+    const reached = reachedAt && currentIso >= reachedAt;
+    return {val: reached ? formatDuration(minutesBetween(c.detected_at, reachedAt)) : null, lbl: label};
+  };
+  const stats = [
+    stat(firstRelay && firstRelay.deploy_at, 'To first relay online'),
+    stat(c.phase_2.connectivity_complete_at, 'To full connectivity'),
+    stat(firstSurvivor && firstSurvivor.found_at, 'To first survivor found'),
+    stat(firstMed && firstMed.delivered_at, 'To first relief delivered'),
+  ];
+  el.innerHTML = stats.map(s=>
+    `<div class="impact-stat"><div class="val${s.val?'':' pending'}">${s.val || 'Pending'}</div><div class="lbl">${s.lbl}</div></div>`
+  ).join('');
+}
+
 function renderCaseDetail(c){
   const currentIso = FRAME_ISO[state.frameIndex];
   const p2 = computePhase2(c, currentIso);
@@ -1002,6 +1071,8 @@ function renderCaseDetail(c){
   const nextText = nextMilestoneFor(c, currentIso);
   nextEl.hidden = !nextText;
   if(nextText) document.getElementById('nextMilestoneText').textContent = nextText;
+
+  renderCaseImpactStrip(c, currentIso);
 
   const p1CorridorCount = (c.phase_1.damage_by_station ? Object.keys(c.phase_1.damage_by_station).length : null);
   const phases = [

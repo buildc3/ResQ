@@ -82,6 +82,8 @@ async function desktopPass() {
   await page.waitForTimeout(150);
   await page.screenshot({ path: shot('03-cases-list') });
   check('1 case row visible', await page.locator('.case-row').count() === 1);
+  check('impact strip shown once a case is revealed', await page.locator('#impactStrip').isVisible());
+  check('impact strip has stat tiles', await page.locator('#impactStrip .impact-stat').count() === 4);
 
   await page.locator('.case-row').first().click();
   await page.waitForTimeout(150);
@@ -90,6 +92,7 @@ async function desktopPass() {
   // .innerText() reflects rendered text, and .card h3 is CSS text-transform:uppercase — compare case-insensitively.
   check('case detail shows damage assessment heat map', (await page.locator('#tab-p1').innerText()).toLowerCase().includes('damage / infrastructure assessment'));
   check('phase 1 jargon terms have plain-language tooltips', await page.locator('#tab-p1 .info-chip .info-tooltip').count() > 0);
+  check('case impact snapshot shows response-speed stats', await page.locator('#caseImpactStrip .impact-stat').count() === 4);
 
   await page.locator('.tab[data-tab="p2"]').click();
   await page.waitForTimeout(100);
@@ -184,6 +187,8 @@ async function desktopPass() {
   check('all medical deliveries complete by end of timeline', !!medMatch && medMatch[1] === medMatch[2] && Number(medMatch[2]) > 0);
   const stepThreeClass = await page.locator('.step').nth(2).getAttribute('class');
   check('stepper shows Phase 3 done (not stuck pending/active) by end of timeline', stepThreeClass.includes('done'));
+  check('case impact snapshot fully resolved (no pending stats) by end of timeline',
+    await page.locator('#caseImpactStrip .impact-stat .val.pending').count() === 0);
 
   await page.locator('#backToCases').click();
   await page.waitForTimeout(100);
