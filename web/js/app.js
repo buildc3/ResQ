@@ -21,6 +21,7 @@ const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct'
 const STATUS_COLOR = {normal:'var(--green)', elevated:'var(--amber)', critical:'var(--red)'};
 const STATUS_HEX = {normal:'#1f8a4c', elevated:'#b8790b', critical:'#c9302c'};
 const DISASTER_LABEL = {cloudburst_glof:'Cloudburst / GLOF', earthquake:'Earthquake'};
+const PREFERS_REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ---------- PLAIN-LANGUAGE TOOLTIPS FOR MODEL JARGON ---------- */
 const MODEL_TOOLTIPS = {
@@ -537,8 +538,12 @@ function renderStationList(){
     const status = riskStatus(stationRisk(s.id, state.frameIndex));
     const row = document.createElement('div');
     row.className='station-row'+(s.id===state.selectedStation?' selected':'');
-    row.innerHTML = `<span class="status-dot" style="background:${STATUS_COLOR[status]}"></span><span class="name">${s.name}</span><span class="val">${sample.rainfall.toFixed(1)}mm/hr</span>`;
+    row.innerHTML = `<span class="status-dot shape-${status}" style="background:${STATUS_COLOR[status]}"></span><span class="name">${s.name}</span><span class="val">${sample.rainfall.toFixed(1)}mm/hr</span>`;
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.setAttribute('aria-label', `${s.name} — ${status} risk. Select to view details.`);
     row.addEventListener('click', ()=>{ state.selectedStation=s.id; renderStationList(); renderStationDetail(); });
+    row.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); row.click(); } });
     el.appendChild(row);
   });
 }
@@ -564,7 +569,7 @@ function renderStationDetail(){
 
   el.innerHTML = `
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
-      <span class="status-dot" style="background:${STATUS_COLOR[status]}"></span>
+      <span class="status-dot shape-${status}" style="background:${STATUS_COLOR[status]}"></span>
       <strong style="font-size:13.5px">${s.name}</strong>
       <span style="margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--text-faint);text-transform:uppercase">${status}</span>
     </div>
@@ -579,10 +584,15 @@ function renderStationDetail(){
 let scrubTrack, scrubFill, scrubPlayhead, timeLabelEl, playBtn;
 let applySpeed = null; // assigned in initTransport; story mode reuses it to hit a target duration
 
+function setPlayBtnState(playing){
+  playBtn.textContent = playing ? '❚❚' : '▶';
+  playBtn.setAttribute('aria-label', playing ? 'Pause the timeline' : 'Play the timeline');
+}
 function setFrame(idx){
   const clamped = Math.max(0, Math.min(TOTAL_FRAMES-1, Math.round(idx)));
   state.frameFloat = clamped;
   state.frameIndex = clamped;
+  if(scrubTrack) scrubTrack.setAttribute('aria-valuenow', String(clamped));
   render();
 }
 function initTransport(){
@@ -592,8 +602,18 @@ function initTransport(){
   timeLabelEl = document.getElementById('timeLabel');
   playBtn = document.getElementById('playBtn');
 
+  scrubTrack.tabIndex = 0;
+  scrubTrack.setAttribute('role', 'slider');
+  scrubTrack.setAttribute('aria-label', 'Timeline scrubber');
+  scrubTrack.setAttribute('aria-valuemin', '0');
+  scrubTrack.setAttribute('aria-valuemax', String(TOTAL_FRAMES-1));
+  scrubTrack.addEventListener('keydown', e=>{
+    const step = e.shiftKey ? 24 : 1; // 4 hours per shift+arrow, 10 min per arrow
+    if(e.key==='ArrowRight'){ e.preventDefault(); state.playing=false; setPlayBtnState(false); stopStoryMode(); setFrame(state.frameIndex+step); }
+    else if(e.key==='ArrowLeft'){ e.preventDefault(); state.playing=false; setPlayBtnState(false); stopStoryMode(); setFrame(state.frameIndex-step); }
+  });
   scrubTrack.addEventListener('pointerdown', e=>{
-    state.playing=false; playBtn.textContent='▶';
+    state.playing=false; setPlayBtnState(false);
     stopStoryMode();
     const move = (ev)=>{
       const rect = scrubTrack.getBoundingClientRect();
@@ -625,7 +645,7 @@ function initTransport(){
   applySpeed(state.speed);
   playBtn.addEventListener('click', ()=>{
     state.playing = !state.playing;
-    playBtn.textContent = state.playing ? '❚❚' : '▶';
+    setPlayBtnState(state.playing);
     state.lastTs = null;
   });
 }
@@ -708,7 +728,7 @@ function startStoryMode(){
   if(applySpeed) applySpeed((TOTAL_FRAMES-1)/(BASE_FPS_PER_X*STORY_TARGET_SECONDS));
   state.playing = true;
   state.lastTs = null;
-  if(playBtn) playBtn.textContent = '❚❚';
+  if(playBtn) setPlayBtnState(true);
   const btn = document.getElementById('playStoryBtn');
   if(btn){ btn.classList.add('playing'); btn.textContent = '❚❚ Playing story…'; }
 }
@@ -740,7 +760,7 @@ function initStoryUI(){
     if(state.storyMode){
       stopStoryMode();
       state.playing = false;
-      if(playBtn) playBtn.textContent = '▶';
+      if(playBtn) setPlayBtnState(false);
     } else {
       startStoryMode();
     }
@@ -787,11 +807,18 @@ function render(){
   STATIONS.forEach(s=>{
     const status = riskStatus(stationRisk(s.id, state.frameIndex));
     const ref = markerRefs[s.id];
-    ref.dot.setStyle({fillColor: STATUS_HEX[status]});
+    // Ring style (not just fill color) also carries status, so critical vs.
+    // normal still reads for red/green colorblind viewers on the map itself.
+    ref.dot.setStyle({
+      fillColor: STATUS_HEX[status],
+      weight: status==='critical' ? 3 : status==='elevated' ? 2.5 : 2,
+      color: status==='critical' ? '#5a1010' : '#ffffff',
+      dashArray: status==='elevated' ? '2,2' : null,
+    });
     if(status==='critical'){
-      ref.pulse.setStyle({radius:14, color:STATUS_HEX[status], opacity:(0.6+0.4*Math.sin(performance.now()/180))});
+      ref.pulse.setStyle({radius:14, color:STATUS_HEX[status], opacity: PREFERS_REDUCED_MOTION ? 0.8 : (0.6+0.4*Math.sin(performance.now()/180))});
     } else if(isSearchActiveAt(s.id, currentIso)){
-      ref.pulse.setStyle({radius:12, color:'#2b7fb0', opacity:(0.5+0.35*Math.sin(performance.now()/220))});
+      ref.pulse.setStyle({radius:12, color:'#2b7fb0', opacity: PREFERS_REDUCED_MOTION ? 0.7 : (0.5+0.35*Math.sin(performance.now()/220))});
     } else {
       ref.pulse.setStyle({radius:0, opacity:0});
     }
@@ -812,6 +839,7 @@ function render(){
   scrubFill.style.width = frac+'%';
   scrubPlayhead.style.left = frac+'%';
   timeLabelEl.textContent = formatLabel(currentIso);
+  if(scrubTrack) scrubTrack.setAttribute('aria-valuenow', String(state.frameIndex));
   document.getElementById('clock').textContent = 'SIM T+ '+formatLabel(currentIso);
 
   CASES.forEach(c=>{
@@ -838,7 +866,7 @@ function tick(ts){
   state.lastTs = ts;
   if(state.playing){
     state.frameFloat += state.speed*BASE_FPS_PER_X*dt;
-    if(state.frameFloat>=TOTAL_FRAMES-1){ state.frameFloat=TOTAL_FRAMES-1; state.playing=false; playBtn.textContent='▶'; stopStoryMode(); }
+    if(state.frameFloat>=TOTAL_FRAMES-1){ state.frameFloat=TOTAL_FRAMES-1; state.playing=false; setPlayBtnState(false); stopStoryMode(); }
     state.frameIndex = Math.floor(state.frameFloat);
     render();
   }
@@ -887,13 +915,19 @@ function renderCasesView(){
             <td>${c.location.region_label}</td>
             <td style="font-family:var(--mono);color:var(--text-dim)">${formatLabel(c.detected_at)}</td>
             <td><span class="sev-badge" style="background:${sev.bg};color:${sev.fg}">${Math.round(c.severity.peak_probability*100)} — ${c.severity.severity_label.toUpperCase()}</span></td>
-            <td><div class="phase-mini"><span class="seg ${phaseSegClass(c.phase_1.status)}"></span><span class="seg ${phaseSegClass(p2.status)}"></span><span class="seg ${phaseSegClass(p3.status)}"></span></div></td>
+            <td><div class="phase-mini">
+              <span class="seg ${phaseSegClass(c.phase_1.status)}" title="Phase 1 — Detection: confirmed ${formatLabel(c.detected_at)}"></span>
+              <span class="seg ${phaseSegClass(p2.status)}" title="Phase 2 — Search &amp; Connectivity: ${p2.connectivityPct}% connectivity, ${p2.survivorsFound}/${p2.totalSurvivors} survivors found"></span>
+              <span class="seg ${phaseSegClass(p3.status)}" title="Phase 3 — Relief Delivery: ${p3.medDelivered.length}/${p3.meds.length} zones supplied, ${Math.round(p3.totalKg)}kg delivered"></span>
+            </div></td>
           </tr>`;
         }).join('')}
       </tbody>
     </table>`;
   content.querySelectorAll('.case-row').forEach(row=>{
-    row.addEventListener('click', ()=> openCaseDetail(row.dataset.case));
+    const activate = ()=> openCaseDetail(row.dataset.case);
+    row.addEventListener('click', activate);
+    makeKeyboardActionable(row, activate);
   });
 }
 
@@ -923,6 +957,37 @@ function refreshOpenCaseDetail(){
   renderCaseDetail(c);
 }
 
+/** Scans every remaining scheduled event across phase 2 + 3 for this case and
+    returns a plain-language description of whichever real timestamp is
+    coming up soonest — nothing scripted, just the nearest not-yet-reached
+    entry in the case's own generated schedule. */
+function nextMilestoneFor(c, currentIso){
+  const name = (id) => (STATION_LOOKUP[id] && STATION_LOOKUP[id].name) || id;
+  const candidates = [];
+  (c.phase_2.relay_schedule||[]).forEach(r=>{
+    if(currentIso < r.deploy_at) candidates.push({at:r.deploy_at, text:`Next relay deploying at ${name(r.station_id)} — ${formatLabel(r.deploy_at)}`});
+  });
+  if(c.phase_2.connectivity_complete_at && currentIso < c.phase_2.connectivity_complete_at){
+    candidates.push({at:c.phase_2.connectivity_complete_at, text:`Full connectivity restored by ${formatLabel(c.phase_2.connectivity_complete_at)}`});
+  }
+  (c.phase_2.search_zones||[]).forEach(z=>{
+    if(currentIso < z.search_start) candidates.push({at:z.search_start, text:`Search sweep starting at ${name(z.station_id)} — ${formatLabel(z.search_start)}`});
+    (z.survivors||[]).forEach(s=>{
+      if(currentIso < s.found_at) candidates.push({at:s.found_at, text:`Next survivor expected found near ${name(z.station_id)} — ${formatLabel(s.found_at)}`});
+    });
+    if(currentIso < z.search_complete) candidates.push({at:z.search_complete, text:`Search sweep at ${name(z.station_id)} completing ${formatLabel(z.search_complete)}`});
+  });
+  (c.phase_3.medical_deliveries||[]).forEach(m=>{
+    if(currentIso < m.delivered_at) candidates.push({at:m.delivered_at, text:`Medical delivery arriving at ${name(m.station_id)} — ${formatLabel(m.delivered_at)}`});
+  });
+  (c.phase_3.relief_sorties||[]).forEach(s=>{
+    if(currentIso < s.delivered_at) candidates.push({at:s.delivered_at, text:`Resupply sortie arriving at ${name(s.station_id)} — ${formatLabel(s.delivered_at)}`});
+  });
+  if(candidates.length===0) return null;
+  candidates.sort((a,b)=> a.at<b.at ? -1 : a.at>b.at ? 1 : 0);
+  return candidates[0].text;
+}
+
 function renderCaseDetail(c){
   const currentIso = FRAME_ISO[state.frameIndex];
   const p2 = computePhase2(c, currentIso);
@@ -933,16 +998,27 @@ function renderCaseDetail(c){
   document.getElementById('detailType').textContent = DISASTER_LABEL[c.disaster_type] || c.disaster_type;
   document.getElementById('detailSeverity').textContent = `Severity ${c.severity.severity_label} (peak ${Math.round(c.severity.peak_probability*100)}%)`;
 
+  const nextEl = document.getElementById('nextMilestone');
+  const nextText = nextMilestoneFor(c, currentIso);
+  nextEl.hidden = !nextText;
+  if(nextText) document.getElementById('nextMilestoneText').textContent = nextText;
+
+  const p1CorridorCount = (c.phase_1.damage_by_station ? Object.keys(c.phase_1.damage_by_station).length : null);
   const phases = [
-    {n:1, label:'Detection & Surveillance', status:c.phase_1.status},
-    {n:2, label:'Search & Connectivity', status:p2.status},
-    {n:3, label:'Relief Delivery', status:p3.status},
+    {n:1, label:'Detection & Surveillance', status:c.phase_1.status,
+      sub: `Confirmed at ${formatLabel(c.detected_at)}`},
+    {n:2, label:'Search & Connectivity', status:p2.status,
+      sub: p2.status==='pending' ? 'Not yet started'
+        : `${p2.connectivityPct}% connectivity · ${p2.survivorsFound}/${p2.totalSurvivors} survivors found`},
+    {n:3, label:'Relief Delivery', status:p3.status,
+      sub: p3.status==='pending' ? 'Awaiting connectivity'
+        : `${p3.medDelivered.length}/${p3.meds.length} zones supplied · ${Math.round(p3.totalKg)}kg delivered`},
   ];
   document.getElementById('stepper').innerHTML = phases.map((p,i)=>{
     const cls = stepClass(p.status);
     const circle = stepCircle(p.status) || p.n;
     const line = i<phases.length-1 ? `<div class="line" style="${cls==='done'?'background:var(--green)':''}"></div>` : '';
-    return `<div class="step ${cls}"><div class="circle">${circle}</div><div class="label">${p.n} · ${p.label}</div></div>${line}`;
+    return `<div class="step ${cls}"><div class="circle">${circle}</div><div class="step-text"><div class="label">${p.n} · ${p.label}</div><div class="step-sub">${p.sub}</div></div></div>${line}`;
   }).join('');
 
   renderPhase1Tab(c);
@@ -1100,11 +1176,26 @@ function damageAssessmentCardHtml(damageByStation){
     </div>`;
 }
 
+// Div-based controls (nav tabs, detail tabbar, back link) aren't natively
+// focusable/actionable by keyboard — make each one behave like a real
+// button for anyone not using a mouse.
+function makeKeyboardActionable(el, onActivate){
+  el.tabIndex = 0;
+  if(!el.hasAttribute('role')) el.setAttribute('role', 'button');
+  el.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter' || e.key===' '){ e.preventDefault(); onActivate(); }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', ()=>{
   document.querySelectorAll('.nav-tab').forEach(tab=>{
-    tab.addEventListener('click', ()=> switchView(tab.dataset.view));
+    const activate = ()=> switchView(tab.dataset.view);
+    tab.addEventListener('click', activate);
+    makeKeyboardActionable(tab, activate);
   });
-  document.getElementById('backToCases').addEventListener('click', ()=> switchView('cases'));
+  const backLink = document.getElementById('backToCases');
+  backLink.addEventListener('click', ()=> switchView('cases'));
+  makeKeyboardActionable(backLink, ()=> switchView('cases'));
   document.getElementById('damageToggle').addEventListener('change', (e)=>{
     damageLayerVisible = e.target.checked;
     damageHeat.setVisible(damageLayerVisible);
@@ -1115,6 +1206,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t===tab));
     document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
     document.getElementById('tab-'+tab.dataset.tab).classList.add('active');
+  });
+  document.querySelectorAll('.tab').forEach(tab=>{
+    makeKeyboardActionable(tab, ()=> tab.click());
   });
 });
 

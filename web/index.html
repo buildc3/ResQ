@@ -42,7 +42,7 @@
   </div>
 </div>
 
-<div id="storyCaption" class="story-caption" hidden>
+<div id="storyCaption" class="story-caption" role="status" aria-live="polite" hidden>
   <span id="storyCaptionIcon">⚠</span>
   <span id="storyCaptionText"></span>
 </div>
@@ -61,7 +61,7 @@
     </div>
   </header>
 
-  <div class="alert-banner" id="alertBanner">
+  <div class="alert-banner" id="alertBanner" role="alert" aria-live="assertive">
     <span class="dot"></span>
     <span id="alertText">Alert</span>
     <a href="#" id="alertLink">View case →</a>
@@ -78,9 +78,9 @@
         <div class="map-wrap">
           <div id="mapDiv"></div>
           <div class="legend">
-            <div class="legend-row"><span class="legend-dot" style="background:var(--green)"></span>Normal</div>
-            <div class="legend-row"><span class="legend-dot" style="background:var(--amber)"></span>Elevated</div>
-            <div class="legend-row"><span class="legend-dot" style="background:var(--red)"></span>Critical</div>
+            <div class="legend-row"><span class="legend-dot shape-normal" style="background:var(--green)"></span>Normal</div>
+            <div class="legend-row"><span class="legend-dot shape-elevated" style="background:var(--amber)"></span>Elevated</div>
+            <div class="legend-row"><span class="legend-dot shape-critical" style="background:var(--red)"></span>Critical</div>
             <div class="legend-row"><span class="legend-dot" style="background:#2b7fb0"></span>Search active</div>
             <div class="legend-row"><span class="legend-dot" style="background:#2b7fb0;opacity:.5"></span>Relay online</div>
             <div class="legend-row"><span class="legend-dot" style="background:#0d9488"></span>Survivor found</div>
@@ -103,7 +103,7 @@
     </div>
 
     <div class="transport">
-      <button class="play" id="playBtn">▶</button>
+      <button class="play" id="playBtn" aria-label="Play or pause the timeline">▶</button>
       <div class="speed-select" id="speedSelect">
         <input type="range" id="speedSlider" min="0" max="100" value="25" step="0.1" title="Drag to adjust playback speed">
         <label class="speed-field">speed <input type="number" id="speedInput" value="1" min="0.05" step="any">×</label>
@@ -141,6 +141,7 @@
           <span class="meta-chip" id="detailSeverity">—</span>
         </div>
       </div>
+      <div class="next-milestone" id="nextMilestone" hidden><span class="next-milestone-icon">→</span><span id="nextMilestoneText"></span></div>
       <div class="stepper" id="stepper"></div>
       <div class="tabbar" id="tabbar">
         <div class="tab active" data-tab="p1">Phase 1 — Detection &amp; Surveillance</div>
