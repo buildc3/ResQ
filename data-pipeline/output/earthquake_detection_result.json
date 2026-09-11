@@ -1,0 +1,27 @@
+{
+  "scenario": "earthquake",
+  "model": "sta_lta_multistation",
+  "params": {
+    "sta_samples": 10,
+    "lta_samples": 60,
+    "sigmoid_k": 1.5,
+    "trigger_ratio": 4.0,
+    "trigger_probability": 0.8,
+    "min_confirming_stations": 2,
+    "confirm_window_seconds": 30
+  },
+  "triggered": true,
+  "detected_at": "2023-10-04T09:15:12",
+  "confirming_stations": [
+    "chungthang",
+    "mangan"
+  ],
+  "probability_at_detection": 0.8204,
+  "peak_probability": 0.8705,
+  "peak_probability_at": "2023-10-04T09:15:10",
+  "peak_probability_station": "mangan",
+  "estimated_epicenter": {
+    "lat": 27.5652,
+    "lon": 88.5899
+  }
+}

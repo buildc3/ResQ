@@ -1,0 +1,124 @@
+{
+  "scenario": "earthquake",
+  "label": "Synthetic North Sikkim mainshock + aftershock sequence",
+  "sim_start": "2023-10-02 00:00:00",
+  "sim_end": "2023-10-06 23:50:00",
+  "epicenter": {
+    "lat": 27.55,
+    "lon": 88.55,
+    "label": "North Sikkim fault zone (synthetic)"
+  },
+  "origin_time": "2023-10-04T09:15:00",
+  "p_wave_km_per_s": 6.0,
+  "n_aftershocks": 18,
+  "aftershock_window_hours": 48.0,
+  "ambient_noise_std": 0.02,
+  "events": [
+    {
+      "time": "2023-10-04T09:15:00",
+      "amplitude": 1.0,
+      "kind": "mainshock"
+    },
+    {
+      "time": "2023-10-04T09:15:28.752798125",
+      "amplitude": 0.3675,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-04T10:07:57.555114103",
+      "amplitude": 0.4542,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-04T10:26:47.793307820",
+      "amplitude": 0.1999,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-04T10:44:35.558983221",
+      "amplitude": 0.1775,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-04T11:03:25.675463343",
+      "amplitude": 0.3041,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-04T11:06:05.524063674",
+      "amplitude": 0.1374,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-04T14:19:25.775563667",
+      "amplitude": 0.0978,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-04T15:03:19.855487152",
+      "amplitude": 0.1848,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-04T16:22:07.174849233",
+      "amplitude": 0.1537,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-04T18:24:52.072289865",
+      "amplitude": 0.1884,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-04T22:03:38.906897772",
+      "amplitude": 0.1028,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-05T08:38:18.567269167",
+      "amplitude": 0.0318,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-05T10:06:22.300211001",
+      "amplitude": 0.03,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-05T10:29:49.340867970",
+      "amplitude": 0.03,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-05T12:42:44.444696412",
+      "amplitude": 0.03,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-05T17:56:48.497890576",
+      "amplitude": 0.03,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-05T20:31:01.866343549",
+      "amplitude": 0.03,
+      "kind": "aftershock"
+    },
+    {
+      "time": "2023-10-06T08:38:13.438978330",
+      "amplitude": 0.03,
+      "kind": "aftershock"
+    }
+  ],
+  "station_distances_km": {
+    "lachen": 18.55,
+    "chungthang": 12.33,
+    "mangan": 4.05,
+    "dikchu": 19.67,
+    "singtam": 35.83,
+    "gangtok": 24.13,
+    "gyalshing": 40.76
+  },
+  "seed": 7,
+  "disclaimer": "Synthetic values for demo purposes; not a real recorded earthquake."
+}

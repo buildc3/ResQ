@@ -1,0 +1,19 @@
+{
+  "scenario": "cloudburst_glof",
+  "label": "South Lhonak Lake-style GLOF (synthetic, illustrative)",
+  "sim_start": "2023-10-02 00:00:00",
+  "sim_end": "2023-10-06 23:50:00",
+  "step_minutes": 10,
+  "lake_breach_onset": "2023-10-04T01:30:00",
+  "wave_speed_km_per_h": 15.0,
+  "rain_peak_time": "2023-10-03T21:00:00",
+  "station_onsets": {
+    "lachen": "2023-10-04T01:30:00",
+    "chungthang": "2023-10-04T02:42:00",
+    "mangan": "2023-10-04T03:38:00",
+    "dikchu": "2023-10-04T05:10:00",
+    "singtam": "2023-10-04T06:10:00"
+  },
+  "seed": 42,
+  "disclaimer": "Synthetic values for demo purposes; not recorded measurements."
+}

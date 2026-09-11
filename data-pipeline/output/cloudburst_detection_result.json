@@ -1,0 +1,40 @@
+{
+  "scenario": "cloudburst_glof",
+  "model": "rolling_zscore_fusion",
+  "params": {
+    "baseline_window_samples": 144,
+    "min_periods": 12,
+    "sigmoid_k": 0.8,
+    "sigmoid_midpoint": 2.5,
+    "trigger_probability": 0.8,
+    "confirm_samples": 3,
+    "weights_with_water_level": {
+      "rainfall": 0.3,
+      "water_level_rate": 0.5,
+      "tremor": 0.2
+    },
+    "weights_without_water_level": {
+      "rainfall": 0.6,
+      "tremor": 0.4
+    }
+  },
+  "triggered": true,
+  "detected_at": "2023-10-04T01:20:00",
+  "primary_station": "lachen",
+  "probability_at_detection": 0.8061,
+  "contributing_stations": [
+    "chungthang",
+    "dikchu",
+    "lachen",
+    "mangan"
+  ],
+  "corridor_stations": [
+    "lachen",
+    "chungthang",
+    "mangan",
+    "dikchu"
+  ],
+  "off_corridor_stations": [],
+  "peak_probability": 1.0,
+  "peak_probability_at": "2023-10-04T01:40:00"
+}
