@@ -26,7 +26,7 @@ let STATIONS = [], STATION_LOOKUP = {}, EPICENTER = null;
 let CB_FRAMES = [], EQ_FRAMES = [], CB_STATION_PROB = [], EQ_STATION_PROB = [];
 let CB_REGIONAL = [], EQ_REGIONAL = [], CASES = [];
 let CB_REGIONAL_DISPLAY = [], EQ_REGIONAL_DISPLAY = [];
-let CB_DAMAGE = null, EQ_DAMAGE = null; // {cells:[{id,lat,lon}], frames:[{timestamp,values[]}]}
+let CB_DAMAGE = [], EQ_DAMAGE = []; // [{timestamp, stations:{id:0-10}}, ...] per-station "tower reading" severity
 
 function rollingMedian(series, window=5){
   const half = Math.floor(window/2);
@@ -68,8 +68,8 @@ async function loadData(){
     fetchJson('cloudburst_regional_probability.json'),
     fetchJson('earthquake_regional_probability.json'),
     fetchJson('cases.json'),
-    fetchJson('cloudburst_damage_grid.json'),
-    fetchJson('earthquake_damage_grid.json'),
+    fetchJson('cloudburst_damage_stations.json'),
+    fetchJson('earthquake_damage_stations.json'),
   ]);
   STATIONS = stationsRes.stations;
   STATION_LOOKUP = Object.fromEntries(STATIONS.map(s=>[s.id, s]));
@@ -109,6 +109,12 @@ function stationRisk(stationId, frameIndex){
   const eqP = (EQ_STATION_PROB[frameIndex] && EQ_STATION_PROB[frameIndex].stations[stationId]) ?? 0;
   return Math.max(cbP ?? 0, eqP ?? 0);
 }
+/** 0-10 simulated damage/infrastructure severity at this tower — the max of both scenarios' readings. */
+function stationDamage(stationId, frameIndex){
+  const cbD = (CB_DAMAGE[frameIndex] && CB_DAMAGE[frameIndex].stations[stationId]) ?? 0;
+  const eqD = (EQ_DAMAGE[frameIndex] && EQ_DAMAGE[frameIndex].stations[stationId]) ?? 0;
+  return Math.max(cbD, eqD);
+}
 function riskStatus(p){
   if(p>=TRIGGER_THRESHOLD) return 'critical';
   if(p>=0.4) return 'elevated';
@@ -137,7 +143,7 @@ function damageColor(value){
 
 /* ---------- LEAFLET MAP ---------- */
 let leafMap, markerRefs = {}, epicenterMarker = null, riverLine = null;
-let damageRects = [], damageLayerVisible = true;
+let damageHeatLayer = null, damageLayerVisible = true;
 
 function buildMap(){
   const lats = STATIONS.map(s=>s.lat), lons = STATIONS.map(s=>s.lon);
@@ -148,12 +154,22 @@ function buildMap(){
   leafMap.fitBounds([[latMin-0.06, lonMin-0.06],[latMax+0.06, lonMax+0.06]]);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'&copy; OpenStreetMap contributors', maxZoom:14}).addTo(leafMap);
 
-  // Damage heat map cells — added before station markers so they paint underneath.
-  const damageCells = (CB_DAMAGE && CB_DAMAGE.cells) || [];
-  damageRects = damageCells.map(cell => L.rectangle(
-    [[cell.latMin, cell.lonMin],[cell.latMax, cell.lonMax]],
-    {stroke:false, fillColor:damageColor(0), fillOpacity:0.55, interactive:false, className:'damage-cell'}
-  ).addTo(leafMap));
+  // Damage heat map — a real radiating/blurred heat layer (leaflet.heat) driven
+  // by each station's own "tower reading", not a synthetic interpolation grid.
+  // Added before station markers so it paints underneath them.
+  // leaflet.heat repeatedly reads back its internal canvas (getImageData) to
+  // redraw the gradient; Chrome recommends willReadFrequently for that access
+  // pattern. The plugin doesn't expose a way to pass it, so getContext is
+  // patched for the moment this one canvas is created, then restored.
+  const origGetContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function(type, opts){
+    return origGetContext.call(this, type, type==='2d' ? {...opts, willReadFrequently:true} : opts);
+  };
+  damageHeatLayer = L.heatLayer([], {
+    radius: 55, blur: 40, max: 2, minOpacity: 0,
+    gradient: {0.0:'rgba(253,232,232,0)', 0.15:'rgb(253,232,232)', 0.5:'rgb(211,140,140)', 1.0:'rgb(122,10,10)'},
+  }).addTo(leafMap);
+  HTMLCanvasElement.prototype.getContext = origGetContext;
 
   const corridor = STATIONS.filter(s=>s.has_water_level).sort((a,b)=>a.basin_km-b.basin_km);
   riverLine = L.polyline(corridor.map(s=>[s.lat,s.lon]), {color:'#2b7fb0', weight:3, opacity:0.7})
@@ -351,13 +367,13 @@ function render(){
   renderStationList();
   renderStationDetail();
 
-  if(damageLayerVisible && CB_DAMAGE && EQ_DAMAGE){
-    const cbValues = CB_DAMAGE.frames[state.frameIndex].values;
-    const eqValues = EQ_DAMAGE.frames[state.frameIndex].values;
-    damageRects.forEach((rect, i)=>{
-      const v = Math.max(cbValues[i], eqValues[i]);
-      rect.setStyle({fillColor: damageColor(v), fillOpacity: v < 0.3 ? 0.12 : 0.55});
+  if(damageLayerVisible && damageHeatLayer){
+    const REPEAT = 4; // heat layers accumulate overlapping points additively — stacking copies boosts effective intensity predictably
+    const points = STATIONS.flatMap(s => {
+      const v = stationDamage(s.id, state.frameIndex);
+      return Array.from({length: REPEAT}, () => [s.lat, s.lon, v]);
     });
+    damageHeatLayer.setLatLngs(points);
   }
 
   const cbProb = CB_REGIONAL_DISPLAY[state.frameIndex] || 0;
@@ -511,7 +527,7 @@ function renderPhase1Tab(c){
     .filter(([k,v])=> typeof v !== 'object')
     .map(([k,v])=>`<code>${k}=${v}</code>`).join(' ');
 
-  const damageCardHtml = damageGridCardHtml(c.phase_1.damage_grid);
+  const damageCardHtml = damageAssessmentCardHtml(c.phase_1.damage_by_station);
 
   document.getElementById('tab-p1').innerHTML = `
     <div class="dgrid">
@@ -539,22 +555,27 @@ function renderPhase1Tab(c){
 }
 
 /* Static damage-severity heat map snapshot (CV-simulated infrastructure
-   assessment) at the moment of detection — a small colored grid, not a live map. */
-function damageGridCardHtml(damageGrid){
-  if(!damageGrid || !damageGrid.cells || !damageGrid.values) return '';
-  const cells = damageGrid.cells, values = damageGrid.values;
-  let cols = cells.length;
-  for(let i=1;i<cells.length;i++) if(cells[i].lon < cells[i-1].lon){ cols = i; break; }
-  const swatches = values.map(v=>
-    `<div title="${v.toFixed(1)}" style="background:${damageColor(v)};aspect-ratio:1;border-radius:2px"></div>`
-  ).join('');
+   assessment) at the moment of detection — miniature soft/blurred blobs at
+   each tower's real relative position, echoing the live heat layer's look. */
+function damageAssessmentCardHtml(damageByStation){
+  if(!damageByStation) return '';
+  const lats = STATIONS.map(s=>s.lat), lons = STATIONS.map(s=>s.lon);
+  const latMin = Math.min(...lats), latMax = Math.max(...lats);
+  const lonMin = Math.min(...lons), lonMax = Math.max(...lons);
+  const blobs = STATIONS.map(s=>{
+    const v = damageByStation[s.id] ?? 0;
+    const xPct = ((s.lon-lonMin)/((lonMax-lonMin)||1))*100;
+    const yPct = (1-(s.lat-latMin)/((latMax-latMin)||1))*100; // invert so north is up
+    const size = 34 + v*9;
+    return `<div title="${s.name}: ${v.toFixed(1)}" style="position:absolute;left:${xPct}%;top:${yPct}%;width:${size}px;height:${size}px;transform:translate(-50%,-50%);border-radius:50%;background:${damageColor(v)};filter:blur(11px);opacity:0.9"></div>`;
+  }).join('');
   return `
     <div class="card" style="grid-column:1/-1">
       <h3>Damage / Infrastructure Assessment (simulated CV pass)</h3>
-      <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:2px;max-width:420px">${swatches}</div>
+      <div style="position:relative;width:100%;max-width:420px;height:200px;background:var(--panel-2);border-radius:8px;overflow:hidden">${blobs}</div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11px;color:var(--text-dim)">
         <span>0</span><div class="damage-scale-bar" style="flex:none"></div><span>10</span>
-        <span style="margin-left:10px">Severity index at time of detection — distance-weighted from raw sensor intensity, independent of the detection probability above.</span>
+        <span style="margin-left:10px">Per-tower severity at time of detection — from raw sensor intensity, independent of the detection probability above.</span>
       </div>
     </div>`;
 }
@@ -566,7 +587,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('backToCases').addEventListener('click', ()=> switchView('cases'));
   document.getElementById('damageToggle').addEventListener('change', (e)=>{
     damageLayerVisible = e.target.checked;
-    damageRects.forEach(rect => { rect.getElement() && (rect.getElement().style.display = damageLayerVisible ? '' : 'none'); });
+    if(damageLayerVisible) damageHeatLayer.addTo(leafMap);
+    else leafMap.removeLayer(damageHeatLayer);
   });
   document.getElementById('tabbar').addEventListener('click', e=>{
     const tab = e.target.closest('.tab'); if(!tab) return;

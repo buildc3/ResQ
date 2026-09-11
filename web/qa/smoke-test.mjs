@@ -45,7 +45,7 @@ async function desktopPass() {
   check('7 station rows rendered', await page.locator('.station-row').count() === 7);
   check('map legend visible', await page.locator('.legend').first().isVisible());
   check('damage heat map legend visible', await page.locator('.damage-legend').isVisible());
-  check('damage heat map cells rendered', await page.locator('path.damage-cell').count() > 0);
+  check('damage heat map canvas rendered', await page.locator('#mapDiv canvas').count() > 0);
 
   await page.locator('.station-row').nth(2).click();
   await page.waitForTimeout(150);
@@ -82,9 +82,10 @@ async function desktopPass() {
 
   await page.locator('#damageToggle').uncheck();
   await page.waitForTimeout(150);
-  const firstRectDisplay = await page.locator('path.damage-cell').first().evaluate(el => getComputedStyle(el).display);
-  check('damage heat map hides when toggled off', firstRectDisplay === 'none');
+  check('damage heat map canvas removed when toggled off', await page.locator('#mapDiv canvas').count() === 0);
   await page.locator('#damageToggle').check();
+  await page.waitForTimeout(150);
+  check('damage heat map canvas restored when toggled on', await page.locator('#mapDiv canvas').count() > 0);
 
   const box2 = await track.boundingBox();
   await page.mouse.click(box2.x + box2.width * 0.99, box2.y + box2.height / 2);
