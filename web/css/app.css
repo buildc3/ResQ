@@ -105,9 +105,16 @@ header.topbar{display:flex;align-items:center;gap:24px;padding:0 20px;height:52p
 /* transport bar */
 .transport{flex:none;display:flex;align-items:center;gap:14px;padding:10px 20px;background:var(--bg-2);border-top:1px solid var(--border)}
 .transport button.play{width:32px;height:32px;border-radius:50%;background:var(--accent);border:none;color:var(--bg-2);cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none}
-.speed-select{display:flex;background:var(--panel-2);border:1px solid var(--border);border-radius:6px;overflow:hidden;flex:none}
-.speed-select button{padding:6px 11px;background:none;border:none;color:var(--text-dim);font-size:11.5px;font-family:var(--mono);cursor:pointer}
-.speed-select button.active{background:var(--accent);color:var(--bg-2);font-weight:700}
+.speed-select{display:flex;align-items:center;gap:10px;background:var(--panel-2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;flex:none}
+.speed-select input[type="range"]{width:80px;accent-color:var(--accent);cursor:pointer}
+.speed-field{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-dim);font-family:var(--mono);white-space:nowrap}
+.speed-field input[type="number"]{width:48px;background:var(--panel);border:1px solid var(--border-soft);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:11.5px;padding:3px 4px;text-align:right}
+.speed-field input[type="number"]:focus{outline:1px solid var(--accent);border-color:var(--accent)}
+/* hide native spinner arrows — cramped at this size and not needed alongside the slider */
+.speed-field input[type="number"]::-webkit-outer-spin-button,
+.speed-field input[type="number"]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.speed-field input[type="number"]{-moz-appearance:textfield}
+@media (max-width:820px){.speed-field{display:none}}
 .scrub-wrap{flex:1;position:relative;height:32px;display:flex;align-items:center}
 .scrub-track{position:relative;width:100%;height:6px;background:var(--panel-2);border-radius:3px;cursor:pointer}
 .scrub-fill{position:absolute;left:0;top:0;height:100%;background:var(--accent-dim);border-radius:3px}

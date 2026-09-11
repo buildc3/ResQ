@@ -47,6 +47,20 @@ async function desktopPass() {
   check('damage heat map legend visible', await page.locator('.damage-legend').isVisible());
   check('damage heat map canvas rendered', await page.locator('#mapDiv canvas').count() > 0);
 
+  // Speed controls: typing either field keeps the other in sync, and setting
+  // a target duration actually makes full playback take about that long.
+  await page.locator('#speedInput').fill('10');
+  await page.locator('#speedInput').press('Tab');
+  const durationAfterSpeed10 = Number(await page.locator('#durationInput').inputValue());
+  check('typing speed updates the duration field', Math.abs(durationAfterSpeed10 - 11.98) < 1);
+
+  await page.locator('#durationInput').fill('5');
+  await page.locator('#durationInput').press('Tab');
+  const speedAfterDuration5 = Number(await page.locator('#speedInput').inputValue());
+  check('typing target duration updates the speed field', Math.abs(speedAfterDuration5 - 23.97) < 0.5);
+  await page.locator('#durationInput').fill('120'); // back to ~1x so it doesn't race ahead of the timed clicks below
+  await page.locator('#durationInput').press('Tab');
+
   await page.locator('.station-row').nth(2).click();
   await page.waitForTimeout(150);
   check('station detail shows selected station', (await page.locator('#stationDetail').innerText()).includes('Mangan'));
@@ -84,7 +98,8 @@ async function desktopPass() {
   const p2TextBefore = await page.locator('#tab-p2').innerText();
   await page.locator('.nav-tab[data-view="monitor"]').click();
   await page.waitForTimeout(100);
-  await page.locator('[data-speed="60"]').click();
+  await page.locator('#durationInput').fill('2');
+  await page.locator('#durationInput').press('Tab');
   await page.locator('#playBtn').click();
   await page.locator('.nav-tab[data-view="cases"]').click();
   await page.locator('.case-row').first().click();
@@ -141,7 +156,8 @@ async function desktopPass() {
   await page.waitForTimeout(100);
   await page.mouse.click(box2.x + box2.width * 0.01, box2.y + box2.height / 2);
   await page.waitForTimeout(150);
-  await page.locator('[data-speed="60"]').click();
+  await page.locator('#durationInput').fill('2');
+  await page.locator('#durationInput').press('Tab');
   await page.locator('#playBtn').click();
   await page.waitForTimeout(3000);
   await page.locator('#playBtn').click();
@@ -174,6 +190,22 @@ async function mobilePass() {
   await page.close();
 }
 
+async function speedControlPass() {
+  // Isolated page: this drives a full playthrough, which would reveal both
+  // cases early and break desktopPass's ordered case-reveal checks if shared.
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(500);
+  await page.locator('#durationInput').fill('4');
+  await page.locator('#durationInput').press('Tab');
+  const t0 = Date.now();
+  await page.locator('#playBtn').click();
+  await page.waitForFunction(() => document.getElementById('playBtn').textContent === '▶', { timeout: 15000 });
+  const actualSeconds = (Date.now() - t0) / 1000;
+  check('playback set to "finish in 4s" actually finishes in ~4s', Math.abs(actualSeconds - 4) < 1.5);
+  await page.close();
+}
+
 async function errorStatePass() {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await page.route('**/data/cases.json', (route) => route.fulfill({ status: 500, body: 'boom' }));
@@ -186,6 +218,7 @@ async function errorStatePass() {
 
 await desktopPass();
 await mobilePass();
+await speedControlPass();
 await errorStatePass();
 await browser.close();
 

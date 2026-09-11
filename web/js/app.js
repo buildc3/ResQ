@@ -4,7 +4,19 @@
 /* ---------- CONFIG ---------- */
 const DATA_DIR = 'data';
 const TRIGGER_THRESHOLD = 0.8; // matches TRIGGER_PROB in the detection pipeline
-const SPEED_FPS = {1:6, 10:60, 60:360}; // frames advanced per real second (frame = 10 sim-minutes)
+const BASE_FPS_PER_X = 6; // frames advanced per real second at 1x (frame = 10 sim-minutes) — fps = speed * BASE_FPS_PER_X
+const MIN_SPEED = 0.05, MAX_SPEED = 2000;
+// Slider is a 0-100 log scale over MIN_SPEED..MAX_SPEED so one control usefully
+// covers everything from slow-motion to "finish in under a second".
+function sliderToSpeed(v){
+  const t = v/100;
+  return Math.pow(10, Math.log10(MIN_SPEED) + t*(Math.log10(MAX_SPEED)-Math.log10(MIN_SPEED)));
+}
+function speedToSlider(speed){
+  const t = (Math.log10(speed)-Math.log10(MIN_SPEED))/(Math.log10(MAX_SPEED)-Math.log10(MIN_SPEED));
+  return Math.max(0, Math.min(100, t*100));
+}
+function clampSpeed(v){ return Math.max(MIN_SPEED, Math.min(MAX_SPEED, v)); }
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const STATUS_COLOR = {normal:'var(--green)', elevated:'var(--amber)', critical:'var(--red)'};
 const STATUS_HEX = {normal:'#1f8a4c', elevated:'#b8790b', critical:'#c9302c'};
@@ -464,11 +476,24 @@ function initTransport(){
     window.addEventListener('pointermove',move);
     window.addEventListener('pointerup',up);
   });
-  document.getElementById('speedSelect').addEventListener('click', e=>{
-    const btn = e.target.closest('button'); if(!btn) return;
-    state.speed = Number(btn.dataset.speed);
-    document.querySelectorAll('#speedSelect button').forEach(b=>b.classList.toggle('active', b===btn));
+  // Speed: a slider (drag) and two number inputs (type either "speed ×" or
+  // "finish in N seconds" — they stay in sync, whichever you last touched wins).
+  const speedSlider = document.getElementById('speedSlider');
+  const speedInput = document.getElementById('speedInput');
+  const durationInput = document.getElementById('durationInput');
+  function applySpeed(newSpeed){
+    state.speed = clampSpeed(newSpeed);
+    speedSlider.value = speedToSlider(state.speed);
+    speedInput.value = Math.round(state.speed*100)/100;
+    durationInput.value = Math.round(((TOTAL_FRAMES-1)/(BASE_FPS_PER_X*state.speed))*10)/10;
+  }
+  speedSlider.addEventListener('input', ()=> applySpeed(sliderToSpeed(Number(speedSlider.value))));
+  speedInput.addEventListener('change', ()=> applySpeed(Number(speedInput.value) || 1));
+  durationInput.addEventListener('change', ()=>{
+    const seconds = Number(durationInput.value);
+    if(seconds > 0) applySpeed((TOTAL_FRAMES-1)/(BASE_FPS_PER_X*seconds));
   });
+  applySpeed(state.speed);
   playBtn.addEventListener('click', ()=>{
     state.playing = !state.playing;
     playBtn.textContent = state.playing ? '❚❚' : '▶';
@@ -563,7 +588,7 @@ function tick(ts){
   const dt = (ts - state.lastTs)/1000;
   state.lastTs = ts;
   if(state.playing){
-    state.frameFloat += SPEED_FPS[state.speed]*dt;
+    state.frameFloat += state.speed*BASE_FPS_PER_X*dt;
     if(state.frameFloat>=TOTAL_FRAMES-1){ state.frameFloat=TOTAL_FRAMES-1; state.playing=false; playBtn.textContent='▶'; }
     state.frameIndex = Math.floor(state.frameFloat);
     render();

@@ -83,9 +83,9 @@
     <div class="transport">
       <button class="play" id="playBtn">▶</button>
       <div class="speed-select" id="speedSelect">
-        <button data-speed="1" class="active">1×</button>
-        <button data-speed="10">10×</button>
-        <button data-speed="60">60×</button>
+        <input type="range" id="speedSlider" min="0" max="100" value="25" step="0.1" title="Drag to adjust playback speed">
+        <label class="speed-field">speed <input type="number" id="speedInput" value="1" min="0.05" step="any">×</label>
+        <label class="speed-field">finish in <input type="number" id="durationInput" min="0.1" step="any">s</label>
       </div>
       <div class="scrub-wrap">
         <div class="scrub-track" id="scrubTrack">

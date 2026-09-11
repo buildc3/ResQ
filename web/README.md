@@ -60,6 +60,7 @@ Connect the repo in Netlify — `npm install && npm run build` runs entirely on 
 ## How the UI is wired to real data
 
 - **Timeline**: both `cloudburst_frames.json` and `earthquake_frames.json` share an identical 720-entry, 10-minute grid spanning 2023-10-02 00:00 → 2023-10-06 23:50 — the UI scrubber/playhead is just an index (0-719) into that shared grid.
+- **Playback speed**: a slider (log scale, 0.05×-2000×) plus two synced number inputs — type a speed multiplier directly, or type a target "finish in N seconds" and the app back-solves the multiplier (`speed = (TOTAL_FRAMES-1)/(6*seconds)`, since 6 frames/sec is the fps at 1×). Whichever field you touch last wins; the other one and the slider update to match.
 - **Station risk color**: the max of each station's cloudburst and earthquake per-station probability (`*_station_probability_frames.json`, output by the detection models themselves) — not an ad-hoc UI threshold on raw sensor units.
 - **Gauges**: a 5-frame rolling median of the regional probability curves, purely for a calmer live display (see QA notes below) — the underlying raw curve and all trigger/case logic are untouched.
 - **Case reveal**: cases (`cases.json`) become visible in the UI the moment the timeline's current frame timestamp reaches each case's real `detected_at`.
