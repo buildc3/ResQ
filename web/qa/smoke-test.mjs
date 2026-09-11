@@ -82,10 +82,10 @@ async function desktopPass() {
 
   await page.locator('#damageToggle').uncheck();
   await page.waitForTimeout(150);
-  check('damage heat map canvas removed when toggled off', await page.locator('#mapDiv canvas').count() === 0);
+  check('damage heat map canvas hidden when toggled off', await page.locator('#mapDiv canvas').evaluate(el => getComputedStyle(el).display === 'none'));
   await page.locator('#damageToggle').check();
   await page.waitForTimeout(150);
-  check('damage heat map canvas restored when toggled on', await page.locator('#mapDiv canvas').count() > 0);
+  check('damage heat map canvas restored when toggled on', await page.locator('#mapDiv canvas').evaluate(el => getComputedStyle(el).display !== 'none'));
 
   const box2 = await track.boundingBox();
   await page.mouse.click(box2.x + box2.width * 0.99, box2.y + box2.height / 2);

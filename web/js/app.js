@@ -158,9 +158,89 @@ function damageColor(value){
   return `rgb(${r},${g},${b})`;
 }
 
+/* ---------- DAMAGE HEAT MAP (custom canvas layer) ----------
+   A small hand-rolled heat renderer instead of a third-party plugin: two
+   third-party heat-map libraries in a row produced hidden-internals artifacts
+   here (leaflet.heat's undocumented zoom-dependent intensity normalization,
+   then visible hard-edged seams from its low-zoom cell-bucketing
+   optimization for large radii). Full control over both the accumulation
+   and the color mapping avoids both classes of bug outright:
+     1. Draw each station as a true canvas radial gradient (opaque center to
+        fully transparent at RADIUS_PX) onto an offscreen grayscale-alpha
+        canvas, composited with 'lighter' (additive) so overlapping stations'
+        influence sums smoothly — no grid bucketing, so no seams.
+     2. Read that accumulated alpha back and colorize each pixel through the
+        same green->yellow->orange->red ramp used for the legend, writing
+        the result to the visible canvas. */
+function createHeatCanvas(map){
+  const canvas = L.DomUtil.create('canvas', 'damage-heat-canvas');
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  const off = document.createElement('canvas');
+  const octx = off.getContext('2d', {willReadFrequently:true});
+  map.getPanes().overlayPane.appendChild(canvas);
+
+  const RADIUS_PX = 200;
+  const CENTER_ALPHA_AT = 6; // station value that reaches full center opacity (0-10 scale)
+  let points = []; // [{lat,lon,value}]
+  let visible = true;
+
+  function resize(){
+    const size = map.getSize();
+    canvas.width = off.width = size.x;
+    canvas.height = off.height = size.y;
+    const topLeft = map.containerPointToLayerPoint([0,0]);
+    L.DomUtil.setPosition(canvas, topLeft);
+  }
+
+  function redraw(){
+    if(!visible) return;
+    resize();
+    const w = canvas.width, h = canvas.height;
+    if(w===0 || h===0) return;
+    octx.clearRect(0,0,w,h);
+    octx.globalCompositeOperation = 'lighter';
+    points.forEach(p=>{
+      const v = Math.max(0, Math.min(10, p.value));
+      if(v<=0) return;
+      const pt = map.latLngToContainerPoint([p.lat, p.lon]);
+      const a = Math.min(1, v/CENTER_ALPHA_AT);
+      const grad = octx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, RADIUS_PX);
+      grad.addColorStop(0, `rgba(0,0,0,${a})`);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      octx.fillStyle = grad;
+      octx.fillRect(pt.x-RADIUS_PX, pt.y-RADIUS_PX, RADIUS_PX*2, RADIUS_PX*2);
+    });
+    octx.globalCompositeOperation = 'source-over';
+
+    const imgData = octx.getImageData(0,0,w,h);
+    const data = imgData.data;
+    for(let i=0;i<data.length;i+=4){
+      const alpha = data[i+3];
+      if(alpha===0) continue;
+      const t = alpha/255;
+      const [r,g,b] = severityRgb(t);
+      data[i]=r; data[i+1]=g; data[i+2]=b;
+      data[i+3] = Math.min(230, 40 + alpha*0.8); // keep low-intensity areas faintly visible, cap peak opacity
+    }
+    ctx.clearRect(0,0,w,h);
+    ctx.putImageData(imgData, 0, 0);
+  }
+
+  map.on('move zoom resize', redraw);
+
+  return {
+    setPoints(pts){ points = pts; redraw(); },
+    setVisible(v){
+      visible = v;
+      canvas.style.display = v ? '' : 'none';
+      if(v) redraw();
+    },
+  };
+}
+
 /* ---------- LEAFLET MAP ---------- */
 let leafMap, markerRefs = {}, epicenterMarker = null, riverLine = null;
-let damageHeatLayer = null, damageLayerVisible = true;
+let damageHeat = null, damageLayerVisible = true;
 
 function buildMap(){
   const lats = STATIONS.map(s=>s.lat), lons = STATIONS.map(s=>s.lon);
@@ -171,33 +251,10 @@ function buildMap(){
   leafMap.fitBounds([[latMin-0.06, lonMin-0.06],[latMax+0.06, lonMax+0.06]]);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'&copy; OpenStreetMap contributors', maxZoom:14}).addTo(leafMap);
 
-  // Damage heat map — a real radiating/blurred heat layer (leaflet.heat) driven
-  // by each station's own "tower reading", not a synthetic interpolation grid.
-  // Added before station markers so it paints underneath them.
-  // leaflet.heat repeatedly reads back its internal canvas (getImageData) to
-  // redraw the gradient; Chrome recommends willReadFrequently for that access
-  // pattern. The plugin doesn't expose a way to pass it, so getContext is
-  // patched for the moment this one canvas is created, then restored.
-  const origGetContext = HTMLCanvasElement.prototype.getContext;
-  HTMLCanvasElement.prototype.getContext = function(type, opts){
-    return origGetContext.call(this, type, type==='2d' ? {...opts, willReadFrequently:true} : opts);
-  };
-  // Full-coverage gradient wash (green -> yellow -> orange -> red), like a
-  // standard weather/density heat map — transparent only where there is
-  // truly zero influence from any station, opaque green immediately above that.
-  const heatGradient = {
-    0.0: 'rgba(46,168,90,0)',
-    0.05: 'rgb(46,168,90)',
-    0.35: 'rgb(190,210,60)',
-    0.55: 'rgb(250,210,40)',
-    0.75: 'rgb(250,140,30)',
-    1.0: 'rgb(220,30,30)',
-  };
-  damageHeatLayer = L.heatLayer([], {
-    radius: 140, blur: 100, max: 2, minOpacity: 0,
-    gradient: heatGradient,
-  }).addTo(leafMap);
-  HTMLCanvasElement.prototype.getContext = origGetContext;
+  // Damage heat map — driven by each station's own "tower reading", not a
+  // synthetic interpolation grid. Added before station markers so it paints
+  // underneath them (see createHeatCanvas above for why this is hand-rolled).
+  damageHeat = createHeatCanvas(leafMap);
 
   const corridor = STATIONS.filter(s=>s.has_water_level).sort((a,b)=>a.basin_km-b.basin_km);
   riverLine = L.polyline(corridor.map(s=>[s.lat,s.lon]), {color:'#2b7fb0', weight:3, opacity:0.7})
@@ -395,13 +452,8 @@ function render(){
   renderStationList();
   renderStationDetail();
 
-  if(damageLayerVisible && damageHeatLayer){
-    const REPEAT = 4; // heat layers accumulate overlapping points additively — stacking copies boosts effective intensity predictably
-    const points = STATIONS.flatMap(s => {
-      const v = stationDamage(s.id, state.frameIndex);
-      return Array.from({length: REPEAT}, () => [s.lat, s.lon, v]);
-    });
-    damageHeatLayer.setLatLngs(points);
+  if(damageLayerVisible && damageHeat){
+    damageHeat.setPoints(STATIONS.map(s => ({lat:s.lat, lon:s.lon, value:stationDamage(s.id, state.frameIndex)})));
   }
 
   const cbProb = CB_REGIONAL_DISPLAY[state.frameIndex] || 0;
@@ -615,8 +667,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('backToCases').addEventListener('click', ()=> switchView('cases'));
   document.getElementById('damageToggle').addEventListener('change', (e)=>{
     damageLayerVisible = e.target.checked;
-    if(damageLayerVisible) damageHeatLayer.addTo(leafMap);
-    else leafMap.removeLayer(damageHeatLayer);
+    damageHeat.setVisible(damageLayerVisible);
   });
   document.getElementById('tabbar').addEventListener('click', e=>{
     const tab = e.target.closest('.tab'); if(!tab) return;
