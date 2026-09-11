@@ -73,12 +73,29 @@ async function desktopPass() {
 
   await page.locator('.tab[data-tab="p2"]').click();
   await page.waitForTimeout(100);
-  check('phase 2 placeholder shown', (await page.locator('#tab-p2').innerText()).includes('Phase 2'));
+  const p2Text = (await page.locator('#tab-p2').innerText()).toLowerCase();
+  check('phase 2 shows connectivity restoration', p2Text.includes('connectivity restoration'));
+  check('phase 2 shows search & rescue', p2Text.includes('search') && p2Text.includes('survivors found'));
 
-  await page.locator('#backToCases').click();
-  await page.waitForTimeout(100);
+  // Phase 2 must keep updating live while the user is looking at it, not just
+  // the instant the tab opens — start playback (transport bar is only reachable
+  // from the Monitor view, but the render loop keeps running underneath
+  // whatever view is showing) and confirm the tab's own content changes.
+  const p2TextBefore = await page.locator('#tab-p2').innerText();
   await page.locator('.nav-tab[data-view="monitor"]').click();
   await page.waitForTimeout(100);
+  await page.locator('[data-speed="60"]').click();
+  await page.locator('#playBtn').click();
+  await page.locator('.nav-tab[data-view="cases"]').click();
+  await page.locator('.case-row').first().click();
+  await page.locator('.tab[data-tab="p2"]').click();
+  await page.waitForTimeout(2500);
+  const p2TextAfter = await page.locator('#tab-p2').innerText();
+  check('phase 2 tab content updates live during playback', p2TextAfter !== p2TextBefore);
+
+  await page.locator('.nav-tab[data-view="monitor"]').click();
+  await page.waitForTimeout(100);
+  await page.locator('#playBtn').click(); // stop — transport bar only reachable from Monitor view
 
   await page.locator('#damageToggle').uncheck();
   await page.waitForTimeout(150);
@@ -90,10 +107,33 @@ async function desktopPass() {
   const box2 = await track.boundingBox();
   await page.mouse.click(box2.x + box2.width * 0.99, box2.y + box2.height / 2);
   await page.waitForTimeout(250);
+  await page.screenshot({ path: shot('05-monitor-end') });
+
+  // Relay markers checked here, still on the Monitor view — by end of timeline
+  // both cases' relay chains should be fully deployed.
+  const relayCount = await page.locator('path.relay-marker').count();
+  const relayDeployedCount = await page.locator('path.relay-marker').evaluateAll(els => els.filter(e => getComputedStyle(e).fillOpacity !== '0').length);
+  check('relay markers exist on the map', relayCount > 0);
+  check('all relay markers deployed by end of timeline', relayCount > 0 && relayDeployedCount === relayCount);
+
   await page.locator('.nav-tab[data-view="cases"]').click();
   await page.waitForTimeout(150);
-  await page.screenshot({ path: shot('05-both-cases') });
+  await page.screenshot({ path: shot('06-both-cases') });
   check('both cases revealed by end of timeline', await page.locator('.case-row').count() === 2);
+
+  // By the end of the timeline both cases' Phase 2 work should be long done.
+  const phase2Segs = await page.locator('.case-row .phase-mini .seg').evaluateAll(els => els.map(e => e.className));
+  check('phase 2 shows done (not stuck pending) by end of timeline', phase2Segs.some(c => c.includes('done')));
+
+  await page.locator('.case-row').first().click();
+  await page.waitForTimeout(150);
+  await page.locator('.tab[data-tab="p2"]').click();
+  await page.waitForTimeout(100);
+  await page.screenshot({ path: shot('07-phase2-complete') });
+  const p2FinalText = await page.locator('#tab-p2').innerText();
+  check('connectivity reaches 100% by end of timeline', p2FinalText.includes('100%'));
+  await page.locator('#backToCases').click();
+  await page.waitForTimeout(100);
 
   // Sustained playback shouldn't throw (regression test for the fractional
   // frame-index bug: array lookups need an integer key).

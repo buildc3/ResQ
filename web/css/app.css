@@ -167,6 +167,10 @@ header.topbar{display:flex;align-items:center;gap:24px;padding:0 20px;height:52p
 .fired-row{display:flex;justify-content:space-between;font-size:12.5px;padding:8px 10px;background:var(--panel-2);border-radius:5px}
 .fired-row .n{font-weight:600}
 .fired-row .v{font-family:var(--mono);color:var(--text-dim)}
+.p2-metric{font-family:var(--mono);font-size:28px;font-weight:600;margin-bottom:10px}
+.p2-metric-sub{font-size:13px;color:var(--text-dim);font-weight:400;font-family:var(--sans)}
+.p2-progress{height:8px;background:var(--panel-2);border-radius:4px;overflow:hidden;margin-bottom:14px}
+.p2-progress-fill{height:100%;background:var(--accent);border-radius:4px;transition:width .3s}
 .placeholder-shell{border:1px dashed var(--border);border-radius:8px;padding:30px;text-align:center;color:var(--text-faint);font-size:12.5px;background:repeating-linear-gradient(135deg, var(--panel) 0 10px, var(--panel-2) 10px 20px)}
 .placeholder-shell .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px}
 .model-note{font-size:11.5px;color:var(--text-dim);line-height:1.5;margin-top:10px}

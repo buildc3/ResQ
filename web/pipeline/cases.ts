@@ -7,6 +7,7 @@
 import { STATION_LOOKUP } from './stations.js';
 import type { DetectionResultCloudburst } from './cloudburst.js';
 import type { DetectionResultEarthquake } from './earthquake.js';
+import type { Phase2Plan } from './phase2.js';
 
 function severityLabel(probability: number): 'critical' | 'high' | 'moderate' {
   if (probability >= 0.95) return 'critical';
@@ -14,7 +15,7 @@ function severityLabel(probability: number): 'critical' | 'high' | 'moderate' {
   return 'moderate';
 }
 
-export function buildCloudburstCase(result: DetectionResultCloudburst) {
+export function buildCloudburstCase(result: DetectionResultCloudburst, phase2: Phase2Plan) {
   if (!result.triggered) return null;
   const primary = STATION_LOOKUP[result.primaryStation!];
   const contributing = result.contributingStations!;
@@ -53,12 +54,17 @@ export function buildCloudburstCase(result: DetectionResultCloudburst) {
         `confirmed at ${corridorNames.length} corridor station(s) (${corridorNames.join(', ')}), peaking at ` +
         `${result.peakProbability!.toFixed(2)} probability at ${result.peakProbabilityAt}.`,
     },
-    phase_2: { status: 'pending', search: null, connectivity: null },
+    phase_2: {
+      relay_schedule: phase2.relay_schedule,
+      search_zones: phase2.search_zones,
+      connectivity_complete_at: phase2.connectivity_complete_at,
+      search_complete_at: phase2.search_complete_at,
+    },
     phase_3: { status: 'pending', medical_dispatch: null, relief_dispatch: null },
   };
 }
 
-export function buildEarthquakeCase(result: DetectionResultEarthquake) {
+export function buildEarthquakeCase(result: DetectionResultEarthquake, phase2: Phase2Plan) {
   if (!result.triggered) return null;
   const epicenter = result.estimatedEpicenter!;
   const confirming = result.confirmingStations!;
@@ -90,7 +96,12 @@ export function buildEarthquakeCase(result: DetectionResultEarthquake) {
         `STA/LTA trigger confirmed across ${confirming.length} stations (${confirmingNames.join(', ')}); ` +
         `peak probability ${result.peakProbability!.toFixed(2)} at ${result.peakProbabilityStation}.`,
     },
-    phase_2: { status: 'pending', search: null, connectivity: null },
+    phase_2: {
+      relay_schedule: phase2.relay_schedule,
+      search_zones: phase2.search_zones,
+      connectivity_complete_at: phase2.connectivity_complete_at,
+      search_complete_at: phase2.search_complete_at,
+    },
     phase_3: { status: 'pending', medical_dispatch: null, relief_dispatch: null },
   };
 }

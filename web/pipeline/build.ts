@@ -12,6 +12,7 @@ import { runCloudburst } from './cloudburst.js';
 import { runEarthquake } from './earthquake.js';
 import { buildCloudburstCase, buildEarthquakeCase } from './cases.js';
 import { buildCloudburstStationDamage, buildEarthquakeStationDamage, type StationDamageFrame } from './damage.js';
+import { buildPhase2Plan } from './phase2.js';
 
 const OUT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data');
 
@@ -78,10 +79,19 @@ function main() {
   writeJson('cloudburst_damage_stations.json', cbDamage);
   writeJson('earthquake_damage_stations.json', eqDamage);
 
-  const cbCase = buildCloudburstCase(cb.detectionResult);
-  if (cbCase) (cbCase.phase_1 as Record<string, unknown>).damage_by_station = damageSnapshotAt(cbDamage, cbCase.detected_at!);
-  const eqCase = buildEarthquakeCase(eq.detectionResult);
-  if (eqCase) (eqCase.phase_1 as Record<string, unknown>).damage_by_station = damageSnapshotAt(eqDamage, eqCase.detected_at!);
+  console.log('Building Phase 2 plans (relay deployment + search sweeps)...');
+  let cbCase = null;
+  if (cb.detectionResult.triggered) {
+    const cbPhase2 = buildPhase2Plan(cb.detectionResult.corridorStations ?? [], cb.detectionResult.detectedAt!, 101);
+    cbCase = buildCloudburstCase(cb.detectionResult, cbPhase2);
+    if (cbCase) (cbCase.phase_1 as Record<string, unknown>).damage_by_station = damageSnapshotAt(cbDamage, cbCase.detected_at!);
+  }
+  let eqCase = null;
+  if (eq.detectionResult.triggered) {
+    const eqPhase2 = buildPhase2Plan(eq.detectionResult.confirmingStations ?? [], eq.detectionResult.detectedAt!, 102, EARTHQUAKE_EPICENTER);
+    eqCase = buildEarthquakeCase(eq.detectionResult, eqPhase2);
+    if (eqCase) (eqCase.phase_1 as Record<string, unknown>).damage_by_station = damageSnapshotAt(eqDamage, eqCase.detected_at!);
+  }
 
   const cases = [cbCase, eqCase].filter(Boolean);
   writeJson('cases.json', cases);

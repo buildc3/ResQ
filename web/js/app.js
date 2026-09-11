@@ -19,6 +19,7 @@ const state = {
   // key, so lookups must never use it directly.
   frameIndex: 0, frameFloat: 0, playing:false, speed:1, selectedStation:null,
   currentView:'monitor', lastTs:null, revealedCases: new Set(),
+  openCaseId: null, activeDetailTab: 'p1',
 };
 
 /* ---------- DATA (populated by loadData) ---------- */
@@ -129,6 +130,45 @@ function frameIndexAtOrBefore(iso){
     if(FRAME_ISO[mid] <= iso){ ans=mid; lo=mid+1; } else hi=mid-1;
   }
   return ans;
+}
+
+/* ---------- PHASE 2: SEARCH & CONNECTIVITY (derived live from the timeline) ----------
+   Phase 2 has no separate detection model — its status/progress is entirely a
+   function of comparing the current playhead timestamp against the real
+   relay-deployment and search schedules baked into the case at pipeline time.
+   Same pattern as Phase 1's case-reveal: trust real timestamps, derive UI
+   state from wherever the timeline cursor currently sits. */
+function computePhase2(c, currentIso){
+  const relays = c.phase_2.relay_schedule || [];
+  const zones = c.phase_2.search_zones || [];
+  const deployedRelays = relays.filter(r => currentIso >= r.deploy_at);
+  const pendingRelays = relays.filter(r => currentIso < r.deploy_at);
+  const connectivityPct = relays.length ? Math.round((deployedRelays.length/relays.length)*100) : 0;
+
+  let survivorsFound = 0, totalSurvivors = 0;
+  const zoneStatuses = zones.map(z=>{
+    const foundSoFar = z.survivors.filter(s => currentIso >= s.found_at);
+    survivorsFound += foundSoFar.length;
+    totalSurvivors += z.survivors.length;
+    let status = 'pending';
+    if(currentIso >= z.search_complete) status = 'complete';
+    else if(currentIso >= z.search_start) status = 'active';
+    return {station_id:z.station_id, status, found:foundSoFar.length, total:z.survivors.length, search_start:z.search_start, search_complete:z.search_complete};
+  });
+
+  const allSearchDone = zones.length===0 || zones.every(z => currentIso >= z.search_complete);
+  const allRelaysDone = relays.length===0 || currentIso >= c.phase_2.connectivity_complete_at;
+  const anyStarted = deployedRelays.length>0 || zoneStatuses.some(z=>z.status!=='pending');
+
+  let status = 'pending';
+  if(allSearchDone && allRelaysDone) status = 'complete';
+  else if(anyStarted) status = 'active';
+
+  return {status, connectivityPct, deployedRelays, pendingRelays, survivorsFound, totalSurvivors, zoneStatuses};
+}
+function isSearchActiveAt(stationId, currentIso){
+  return CASES.some(c => (c.phase_2.search_zones||[]).some(z =>
+    z.station_id===stationId && currentIso>=z.search_start && currentIso<z.search_complete));
 }
 
 /* ---------- DAMAGE HEAT MAP COLOR ---------- */
@@ -273,6 +313,40 @@ function buildMap(){
       radius:10, color:'#c9302c', weight:2, fill:true, fillColor:'#c9302c', fillOpacity:0.15, dashArray:'3,3',
     }).bindTooltip('Estimated epicenter', {permanent:false});
   }
+}
+
+/* ---------- PHASE 2: RELAY MARKERS ON THE MAP ----------
+   Network Extender drones daisy-chain from the working network's edge into
+   the disaster corridor — each marker appears the instant its real
+   deploy_at timestamp is reached during playback, and stays (a relay, once
+   landed, doesn't go anywhere), with a dashed line tracing the chain as it grows. */
+let relayState = {};
+function buildRelayLayers(){
+  CASES.forEach(c=>{
+    const markers = {};
+    (c.phase_2.relay_schedule||[]).forEach(r=>{
+      const m = L.circleMarker([r.lat, r.lon], {radius:7, color:'#ffffff', weight:2, fillColor:'#2b7fb0', fillOpacity:0, className:'relay-marker'});
+      m.bindTooltip(`Relay online: ${STATION_LOOKUP[r.station_id].name}`, {direction:'top', offset:[0,-8]});
+      m.addTo(leafMap);
+      markers[r.station_id] = m;
+    });
+    const polyline = L.polyline([], {color:'#2b7fb0', weight:2, dashArray:'5,5', opacity:0.8}).addTo(leafMap);
+    relayState[c.case_id] = {markers, polyline, shownIds:new Set()};
+  });
+}
+function updateRelayLayers(currentIso){
+  CASES.forEach(c=>{
+    const rs = relayState[c.case_id];
+    if(!rs) return;
+    const deployed = (c.phase_2.relay_schedule||[]).filter(r=>currentIso >= r.deploy_at);
+    deployed.forEach(r=>{
+      if(!rs.shownIds.has(r.station_id)){
+        rs.markers[r.station_id].setStyle({fillOpacity:1});
+        rs.shownIds.add(r.station_id);
+      }
+    });
+    rs.polyline.setLatLngs(deployed.map(r=>[r.lat, r.lon]));
+  });
 }
 
 /* ---------- GAUGES ---------- */
@@ -445,6 +519,8 @@ function render(){
     ref.dot.setStyle({fillColor: STATUS_HEX[status]});
     if(status==='critical'){
       ref.pulse.setStyle({radius:14, color:STATUS_HEX[status], opacity:(0.6+0.4*Math.sin(performance.now()/180))});
+    } else if(isSearchActiveAt(s.id, currentIso)){
+      ref.pulse.setStyle({radius:12, color:'#2b7fb0', opacity:(0.5+0.35*Math.sin(performance.now()/220))});
     } else {
       ref.pulse.setStyle({radius:0, opacity:0});
     }
@@ -473,6 +549,13 @@ function render(){
       if(c.disaster_type==='earthquake' && epicenterMarker) epicenterMarker.addTo(leafMap);
     }
   });
+
+  updateRelayLayers(currentIso);
+
+  // Keep whatever's currently on screen live during playback — otherwise
+  // Phase 2's progress would only ever update the instant you first open it.
+  if(state.currentView==='cases') renderCasesView();
+  else if(state.currentView==='detail') refreshOpenCaseDetail();
 }
 
 function tick(ts){
@@ -521,13 +604,14 @@ function renderCasesView(){
       <tbody>
         ${visibleCases.map(c=>{
           const sev = SEV_COLORS[c.severity.severity_label] || SEV_COLORS.moderate;
+          const p2 = computePhase2(c, FRAME_ISO[state.frameIndex]);
           return `<tr class="case-row" data-case="${c.case_id}">
             <td><div class="type-icon"><span class="shape"></span></div></td>
             <td>${c.title}</td>
             <td>${c.location.region_label}</td>
             <td style="font-family:var(--mono);color:var(--text-dim)">${formatLabel(c.detected_at)}</td>
             <td><span class="sev-badge" style="background:${sev.bg};color:${sev.fg}">${Math.round(c.severity.peak_probability*100)} — ${c.severity.severity_label.toUpperCase()}</span></td>
-            <td><div class="phase-mini"><span class="seg ${phaseSegClass(c.phase_1.status)}"></span><span class="seg ${phaseSegClass(c.phase_2.status)}"></span><span class="seg ${phaseSegClass(c.phase_3.status)}"></span></div></td>
+            <td><div class="phase-mini"><span class="seg ${phaseSegClass(c.phase_1.status)}"></span><span class="seg ${phaseSegClass(p2.status)}"></span><span class="seg ${phaseSegClass(c.phase_3.status)}"></span></div></td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -548,6 +632,25 @@ function stepCircle(status){
 }
 function openCaseDetail(caseId){
   const c = CASES.find(x=>x.case_id===caseId); if(!c) return;
+  state.openCaseId = caseId;
+  if(!state.activeDetailTab) state.activeDetailTab = 'p1';
+  renderCaseDetail(c);
+  switchView('detail');
+}
+
+/** Re-renders the currently-open case detail in place (called every tick while
+    viewing it, so Phase 2's live progress updates during playback) — preserves
+    whichever tab the user has selected rather than resetting to Phase 1. */
+function refreshOpenCaseDetail(){
+  if(!state.openCaseId) return;
+  const c = CASES.find(x=>x.case_id===state.openCaseId); if(!c) return;
+  renderCaseDetail(c);
+}
+
+function renderCaseDetail(c){
+  const currentIso = FRAME_ISO[state.frameIndex];
+  const p2 = computePhase2(c, currentIso);
+
   document.getElementById('detailTitle').textContent = c.title;
   document.getElementById('detailDetected').textContent = 'Detected '+formatLabel(c.detected_at);
   document.getElementById('detailType').textContent = DISASTER_LABEL[c.disaster_type] || c.disaster_type;
@@ -555,7 +658,7 @@ function openCaseDetail(caseId){
 
   const phases = [
     {n:1, label:'Detection & Surveillance', status:c.phase_1.status},
-    {n:2, label:'Search & Connectivity', status:c.phase_2.status},
+    {n:2, label:'Search & Connectivity', status:p2.status},
     {n:3, label:'Relief Delivery', status:c.phase_3.status},
   ];
   document.getElementById('stepper').innerHTML = phases.map((p,i)=>{
@@ -566,21 +669,46 @@ function openCaseDetail(caseId){
   }).join('');
 
   renderPhase1Tab(c);
-  document.getElementById('tab-p2').innerHTML = `
-    <div class="placeholder-shell">
-      <div class="tag">Phase 2 · Status: ${c.phase_2.status}</div>
-      Search progress, relay-node placement on the map, and connectivity-restored % will render here once Phase 2 simulation is implemented.
-    </div>`;
+  renderPhase2Tab(c, p2);
   document.getElementById('tab-p3').innerHTML = `
     <div class="placeholder-shell">
       <div class="tag">Phase 3 · Status: ${c.phase_3.status}</div>
       Dispatch status, sorties completed, and supplies delivered vs. pending will render here once Phase 3 simulation is implemented.
     </div>`;
 
-  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab==='p1'));
-  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
-  document.getElementById('tab-p1').classList.add('active');
-  switchView('detail');
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===state.activeDetailTab));
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.toggle('active', t.id==='tab-'+state.activeDetailTab));
+}
+
+function phase2ZoneLabel(z){
+  if(z.status==='complete') return `${z.found}/${z.total} found`;
+  if(z.status==='active') return `searching… ${z.found}/${z.total} found`;
+  return `pending · starts ${formatLabel(z.search_start)}`;
+}
+function renderPhase2Tab(c, p2){
+  const relayRows = c.phase_2.relay_schedule.map(r=>{
+    const deployed = p2.deployedRelays.some(d=>d.station_id===r.station_id);
+    const name = STATION_LOOKUP[r.station_id].name;
+    return `<div class="fired-row"><span class="n">${deployed?'✓':'○'} ${name}</span><span class="v">${deployed?'online since '+formatLabel(r.deploy_at):'deploying '+formatLabel(r.deploy_at)}</span></div>`;
+  }).join('');
+  const zoneRows = p2.zoneStatuses.map(z=>
+    `<div class="fired-row"><span class="n">${STATION_LOOKUP[z.station_id].name}</span><span class="v">${phase2ZoneLabel(z)}</span></div>`
+  ).join('');
+
+  document.getElementById('tab-p2').innerHTML = `
+    <div class="dgrid">
+      <div class="card">
+        <h3>Connectivity Restoration</h3>
+        <div class="p2-metric">${p2.connectivityPct}%</div>
+        <div class="p2-progress"><div class="p2-progress-fill" style="width:${p2.connectivityPct}%"></div></div>
+        <div class="fired-list">${relayRows || '<span style="color:var(--text-faint);font-size:12px">No relay hops needed for this case.</span>'}</div>
+      </div>
+      <div class="card">
+        <h3>Search &amp; Rescue</h3>
+        <div class="p2-metric">${p2.survivorsFound} <span class="p2-metric-sub">/ ${p2.totalSurvivors} survivors found</span></div>
+        <div class="fired-list" style="margin-top:14px">${zoneRows || '<span style="color:var(--text-faint);font-size:12px">No search zones for this case.</span>'}</div>
+      </div>
+    </div>`;
 }
 
 function renderPhase1Tab(c){
@@ -671,6 +799,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   });
   document.getElementById('tabbar').addEventListener('click', e=>{
     const tab = e.target.closest('.tab'); if(!tab) return;
+    state.activeDetailTab = tab.dataset.tab;
     document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t===tab));
     document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
     document.getElementById('tab-'+tab.dataset.tab).classList.add('active');
@@ -686,6 +815,7 @@ async function init(){
   try {
     await loadData();
     buildMap();
+    buildRelayLayers();
     const probPanel = document.getElementById('probPanel');
     gaugeFlood = buildGauge(probPanel, 'Cloudburst / Flood Risk');
     gaugeQuake = buildGauge(probPanel, 'Seismic Risk');
