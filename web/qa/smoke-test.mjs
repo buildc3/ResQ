@@ -131,6 +131,11 @@ async function desktopPass() {
   check('relay markers exist on the map', relayCount > 0);
   check('all relay markers deployed by end of timeline', relayCount > 0 && relayDeployedCount === relayCount);
 
+  const survivorCount = await page.locator('path.survivor-marker').count();
+  const survivorFoundCount = await page.locator('path.survivor-marker').evaluateAll(els => els.filter(e => getComputedStyle(e).fillOpacity !== '0').length);
+  check('survivor markers exist on the map', survivorCount > 0);
+  check('all survivor markers found by end of timeline', survivorCount > 0 && survivorFoundCount === survivorCount);
+
   await page.locator('.nav-tab[data-view="cases"]').click();
   await page.waitForTimeout(150);
   await page.screenshot({ path: shot('06-both-cases') });

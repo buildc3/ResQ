@@ -346,6 +346,37 @@ function buildRelayLayers(){
     relayState[c.case_id] = {markers, polyline, shownIds:new Set()};
   });
 }
+/* Survivor pins — the search schedule already carries a lat/lon and a
+   found_at timestamp per survivor (jittered around the station so multiple
+   pins at one zone don't stack exactly); each just needed a marker that
+   appears the moment its real found_at passes, matching the relay treatment. */
+let survivorState = {};
+function buildSurvivorLayers(){
+  CASES.forEach(c=>{
+    const entries = [];
+    (c.phase_2.search_zones||[]).forEach(z=>{
+      z.survivors.forEach(s=>{
+        const m = L.circleMarker([s.lat, s.lon], {radius:5, color:'#ffffff', weight:1.5, fillColor:'#0d9488', fillOpacity:0, className:'survivor-marker'});
+        m.bindTooltip(`Survivor found — ${STATION_LOOKUP[z.station_id].name}, ${formatLabel(s.found_at)}`, {direction:'top', offset:[0,-6]});
+        m.addTo(leafMap);
+        entries.push({marker:m, found_at:s.found_at, shown:false});
+      });
+    });
+    survivorState[c.case_id] = entries;
+  });
+}
+function updateSurvivorLayers(currentIso){
+  CASES.forEach(c=>{
+    const entries = survivorState[c.case_id];
+    if(!entries) return;
+    entries.forEach(e=>{
+      if(!e.shown && currentIso >= e.found_at){
+        e.marker.setStyle({fillOpacity:1});
+        e.shown = true;
+      }
+    });
+  });
+}
 function updateRelayLayers(currentIso){
   CASES.forEach(c=>{
     const rs = relayState[c.case_id];
@@ -576,6 +607,7 @@ function render(){
   });
 
   updateRelayLayers(currentIso);
+  updateSurvivorLayers(currentIso);
 
   // Keep whatever's currently on screen live during playback — otherwise
   // Phase 2's progress would only ever update the instant you first open it.
@@ -706,8 +738,8 @@ function renderCaseDetail(c){
 }
 
 function phase2ZoneLabel(z){
-  if(z.status==='complete') return `${z.found}/${z.total} found`;
-  if(z.status==='active') return `searching… ${z.found}/${z.total} found`;
+  if(z.status==='complete') return `${z.found}/${z.total} found · completed ${formatLabel(z.search_complete)}`;
+  if(z.status==='active') return `searching since ${formatLabel(z.search_start)} · ${z.found}/${z.total} found`;
   return `pending · starts ${formatLabel(z.search_start)}`;
 }
 function renderPhase2Tab(c, p2){
@@ -716,8 +748,9 @@ function renderPhase2Tab(c, p2){
     const name = STATION_LOOKUP[r.station_id].name;
     return `<div class="fired-row"><span class="n">${deployed?'✓':'○'} ${name}</span><span class="v">${deployed?'online since '+formatLabel(r.deploy_at):'deploying '+formatLabel(r.deploy_at)}</span></div>`;
   }).join('');
+  const zoneIcon = {pending:'○', active:'◐', complete:'✓'};
   const zoneRows = p2.zoneStatuses.map(z=>
-    `<div class="fired-row"><span class="n">${STATION_LOOKUP[z.station_id].name}</span><span class="v">${phase2ZoneLabel(z)}</span></div>`
+    `<div class="fired-row"><span class="n">${zoneIcon[z.status]} ${STATION_LOOKUP[z.station_id].name}</span><span class="v">${phase2ZoneLabel(z)}</span></div>`
   ).join('');
 
   document.getElementById('tab-p2').innerHTML = `
@@ -841,6 +874,7 @@ async function init(){
     await loadData();
     buildMap();
     buildRelayLayers();
+    buildSurvivorLayers();
     const probPanel = document.getElementById('probPanel');
     gaugeFlood = buildGauge(probPanel, 'Cloudburst / Flood Risk');
     gaugeQuake = buildGauge(probPanel, 'Seismic Risk');
