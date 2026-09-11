@@ -14,6 +14,22 @@ It follows a real three-phase structure:
 2. **Search & Connectivity** — the moment a disaster is confirmed, restore network reach into the affected corridor (relay drones daisy-chaining outward) while search teams sweep for survivors in parallel.
 3. **Medical & Relief Delivery** — the instant a zone is reconnected, route relief to it — first a fast precision drop, then sustained resupply for as long as the response continues.
 
+```mermaid
+flowchart LR
+    S["Sensor telemetry\n(rainfall, water level, tremor, seismic)"] --> M{{Detection model}}
+    M -->|"Cloudburst / GLOF:\nrolling z-score fusion"| CASE(["Case created"])
+    M -->|"Earthquake:\nSTA/LTA multi-station"| CASE
+
+    CASE --> R["Phase 2\nRelay drones restore network,\nhop by hop outward"]
+    CASE --> SR["Phase 2\nSearch teams sweep\nfor survivors"]
+
+    R --> RC{Zone relay online?}
+    RC -->|yes| MD["Phase 3\nMedical drone:\none precision delivery"]
+    MD --> HP["Phase 3\nHeavy-payload drone:\nrepeat resupply sorties"]
+```
+
+*Detection decides; connectivity gates relief — a zone gets nothing from Phase 3 until its own Phase 2 relay is online.*
+
 ## What's real, what's simulated
 
 Being direct about this, because it matters for how to read the project:
@@ -38,6 +54,23 @@ web/                Netlify-deployable npm project (this is netlify.toml's build
 netlify.toml         build = "npm run build" (base: web) — Node only, nothing else to provision
 ```
 
+```mermaid
+flowchart TD
+    subgraph BT["Build time — Node (npm run build)"]
+        PIPE["pipeline/*.ts"] --> GEN["Synthetic sensor generation\n(seeded, reproducible)"]
+        GEN --> DET["Detection models\n(z-score fusion / STA-LTA)"]
+        DET --> SCH["Phase 2 + Phase 3\nschedule generation"]
+        SCH --> JSON[("JSON files in web/data/")]
+    end
+    subgraph RT["Runtime — static frontend, no server"]
+        JSON --> UI["index.html / app.js / Leaflet"]
+        UI --> LOOP["Render loop:\ncompare current playhead\nto real timestamps"]
+    end
+    NETLIFY["Netlify build"] --> BT
+```
+
+*Nothing computed at runtime is "live" in the network sense — the frontend is static files reading pre-generated JSON. "Live" refers to the UI re-deriving its own state every frame from real timestamps, not to a network connection.*
+
 ### The pipeline — how a disaster gets detected
 
 Two scenarios run in parallel over an identical 5-day, 10-minute-resolution timeline: a cloudburst/GLOF (modeled on the real Sikkim event) and a hypothetical earthquake. Each has its own detection model, chosen because it's what the real domain actually uses — not picked for novelty:
@@ -52,6 +85,38 @@ Once triggered, a **Case** is created and Phase 2/3 schedules are generated for 
 The one rule the whole UI is built around: **every live number is derived by comparing the current timeline position to real timestamps, recomputed on every frame — never hardcoded, never scripted to a cue.** A relay marker appears exactly when its real `deploy_at` timestamp passes; a case's stepper shows exactly the live connectivity percentage computed against the current playhead; the "Play the Story" guided mode fires its narrated captions by watching for the same real timestamps to pass, not on a fixed clock.
 
 On top of that live-data core, the UI is built to be understandable to someone with no prior context: a first-run intro modal and guided auto-playback, plain-language explainers next to every phase (naming what a "relay drone" or "sigmoid_k" actually means), a live-updating "what's been achieved so far" impact strip, and accessibility work (colorblind-safe shape redundancy on every status indicator, full keyboard operability, `prefers-reduced-motion` support) so the interface itself doesn't become a barrier to the thing it's trying to explain.
+
+### How one case unfolds
+
+```mermaid
+sequenceDiagram
+    participant Sensors
+    participant Detector
+    participant Case
+    participant Relay as Relay drones
+    participant Search as Search teams
+    participant Medical as Medical drone
+    participant Heavy as Heavy-payload drone
+
+    Sensors->>Detector: readings, every 10 simulated minutes
+    Detector->>Detector: rolling z-score fusion / STA-LTA
+    Detector->>Case: threshold sustained → case created
+    Case->>Relay: deploy schedule (outward from network edge)
+    Case->>Search: sweep schedule, per zone
+    par restoring connectivity
+        Relay-->>Case: zone relay online
+    and searching in parallel
+        Search-->>Case: survivor found
+    end
+    Case->>Medical: dispatch precision delivery (zone reconnected)
+    Medical-->>Case: delivered
+    loop every ~20-30h while the response continues
+        Case->>Heavy: dispatch resupply sortie
+        Heavy-->>Case: sortie delivered
+    end
+```
+
+*Every arrow above corresponds to a real timestamp already sitting in that case's generated schedule before the UI ever renders a frame — the frontend's only job is noticing, each tick, which of these have happened yet.*
 
 ## Getting started
 
