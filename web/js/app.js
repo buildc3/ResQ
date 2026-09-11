@@ -22,6 +22,30 @@ const STATUS_COLOR = {normal:'var(--green)', elevated:'var(--amber)', critical:'
 const STATUS_HEX = {normal:'#1f8a4c', elevated:'#b8790b', critical:'#c9302c'};
 const DISASTER_LABEL = {cloudburst_glof:'Cloudburst / GLOF', earthquake:'Earthquake'};
 
+/* ---------- PLAIN-LANGUAGE TOOLTIPS FOR MODEL JARGON ---------- */
+const MODEL_TOOLTIPS = {
+  rolling_zscore_fusion: "Detects anomalies by comparing each station's live rainfall, water-level, and tremor readings to its own recent normal range, then combines all three into one score.",
+  sta_lta_multistation: "The standard seismology trigger: compares a short recent average of ground motion to a longer baseline average — a sudden spike signals an earthquake. Confirmed only once multiple stations agree.",
+  baseline_window_samples: "How many past readings define \"normal\" for comparison (144 samples = 24 hours at 10-min resolution).",
+  min_periods: "Minimum history required before the model trusts its own baseline enough to score anomalies.",
+  sigmoid_k: "How sharply probability ramps up once past the anomaly threshold — higher = a more decisive on/off switch, lower = a more gradual rise.",
+  sigmoid_midpoint: "The anomaly strength (z-score) that maps to 50% probability.",
+  trigger_probability: "The probability that must be reached and sustained before a case is created.",
+  confirm_samples: "How many consecutive anomalous readings are required before triggering — stops a single noisy blip from creating a false alarm.",
+  weights_with_water_level: "How much each signal (rainfall, water-level rise, tremor) counts toward the combined score at river/lake stations.",
+  weights_without_water_level: "Same idea, for reference stations with no water-level sensor.",
+  sta_samples: "The \"short-term\" window (seconds) — recent ground-motion energy.",
+  lta_samples: "The \"long-term\" window (seconds) — baseline ground-motion energy the short-term window is compared against.",
+  trigger_ratio: "How many times higher short-term energy must be than long-term energy to count as an anomaly.",
+  min_confirming_stations: "Number of stations that must independently trigger within the confirm window before the earthquake is treated as real, not noise.",
+  confirm_window_seconds: "How close together in time station triggers must land to count as the same event (matches real wave-propagation delay).",
+};
+function tooltipChip(text, key){
+  const tip = MODEL_TOOLTIPS[key];
+  if(!tip) return `<code>${text}</code>`;
+  return `<code class="info-chip" tabindex="0">${text}<span class="info-tooltip">${tip}</span></code>`;
+}
+
 /* ---------- STATE ---------- */
 const state = {
   // frameIndex is always an integer — the only thing used for data lookups.
@@ -32,6 +56,7 @@ const state = {
   frameIndex: 0, frameFloat: 0, playing:false, speed:1, selectedStation:null,
   currentView:'monitor', lastTs:null, revealedCases: new Set(),
   openCaseId: null, activeDetailTab: 'p1',
+  storyMode:false, storyEvents: [], storyNextIdx: 0,
 };
 
 /* ---------- DATA (populated by loadData) ---------- */
@@ -552,6 +577,7 @@ function renderStationDetail(){
 
 /* ---------- TRANSPORT / TIMELINE ---------- */
 let scrubTrack, scrubFill, scrubPlayhead, timeLabelEl, playBtn;
+let applySpeed = null; // assigned in initTransport; story mode reuses it to hit a target duration
 
 function setFrame(idx){
   const clamped = Math.max(0, Math.min(TOTAL_FRAMES-1, Math.round(idx)));
@@ -568,6 +594,7 @@ function initTransport(){
 
   scrubTrack.addEventListener('pointerdown', e=>{
     state.playing=false; playBtn.textContent='▶';
+    stopStoryMode();
     const move = (ev)=>{
       const rect = scrubTrack.getBoundingClientRect();
       const frac = Math.max(0,Math.min(1,(ev.clientX-rect.left)/rect.width));
@@ -583,12 +610,12 @@ function initTransport(){
   const speedSlider = document.getElementById('speedSlider');
   const speedInput = document.getElementById('speedInput');
   const durationInput = document.getElementById('durationInput');
-  function applySpeed(newSpeed){
+  applySpeed = function(newSpeed){
     state.speed = clampSpeed(newSpeed);
     speedSlider.value = speedToSlider(state.speed);
     speedInput.value = Math.round(state.speed*100)/100;
     durationInput.value = Math.round(((TOTAL_FRAMES-1)/(BASE_FPS_PER_X*state.speed))*10)/10;
-  }
+  };
   speedSlider.addEventListener('input', ()=> applySpeed(sliderToSpeed(Number(speedSlider.value))));
   speedInput.addEventListener('change', ()=> applySpeed(Number(speedInput.value) || 1));
   durationInput.addEventListener('change', ()=>{
@@ -600,6 +627,123 @@ function initTransport(){
     state.playing = !state.playing;
     playBtn.textContent = state.playing ? '❚❚' : '▶';
     state.lastTs = null;
+  });
+}
+
+/* ---------- GUIDED "PLAY THE STORY" MODE ----------
+   Captions are built once from each case's own real generated schedule
+   (detection, first relay, connectivity restored, first survivor, search
+   complete, first medical drop, last resupply sortie) — never scripted —
+   and fired during normal playback by comparing the timeline position
+   against these real timestamps, the same pattern every other live view
+   in this app already uses. */
+const STORY_TARGET_SECONDS = 50;
+function buildStoryEvents(){
+  const events = [];
+  CASES.forEach(c=>{
+    const label = DISASTER_LABEL[c.disaster_type] || c.disaster_type;
+    events.push({at:c.detected_at, icon:'⚠', text:`${label} detected near ${c.location.region_label} — Case ${c.case_id} opens.`});
+
+    const relays = c.phase_2.relay_schedule || [];
+    if(relays.length){
+      const first = relays.reduce((a,b)=> a.deploy_at<b.deploy_at ? a:b);
+      events.push({at:first.deploy_at, icon:'📡', text:`First relay drone online for ${c.case_id} — connectivity chain begins extending into the corridor.`});
+      if(c.phase_2.connectivity_complete_at){
+        events.push({at:c.phase_2.connectivity_complete_at, icon:'✅', text:`Relay chain complete for ${c.case_id} — full connectivity restored to the corridor.`});
+      }
+    }
+    const zones = c.phase_2.search_zones || [];
+    const allSurvivors = zones.flatMap(z=>z.survivors||[]);
+    if(allSurvivors.length){
+      const first = allSurvivors.reduce((a,b)=> a.found_at<b.found_at ? a:b);
+      events.push({at:first.found_at, icon:'🧭', text:`First survivor located during the search sweep for ${c.case_id}.`});
+    }
+    if(zones.length){
+      const lastComplete = zones.reduce((a,b)=> a.search_complete>b.search_complete ? a:b);
+      events.push({at:lastComplete.search_complete, icon:'🔎', text:`Search & rescue sweep complete for ${c.case_id}.`});
+    }
+    const meds = c.phase_3.medical_deliveries || [];
+    if(meds.length){
+      const first = meds.reduce((a,b)=> a.delivered_at<b.delivered_at ? a:b);
+      events.push({at:first.delivered_at, icon:'💊', text:`First medical payload delivered for ${c.case_id}.`});
+    }
+    const sorties = c.phase_3.relief_sorties || [];
+    if(sorties.length){
+      const last = sorties.reduce((a,b)=> a.delivered_at>b.delivered_at ? a:b);
+      events.push({at:last.delivered_at, icon:'📦', text:`Final relief sortie delivered for ${c.case_id} — sustained resupply complete.`});
+    }
+  });
+  events.sort((a,b)=> a.at<b.at ? -1 : a.at>b.at ? 1 : 0);
+  return events;
+}
+
+let storyCaptionHideTimer=null, storyCaptionRemoveTimer=null;
+function showStoryCaption(icon, text){
+  const el = document.getElementById('storyCaption');
+  clearTimeout(storyCaptionHideTimer); clearTimeout(storyCaptionRemoveTimer);
+  el.classList.remove('leaving');
+  el.hidden = false;
+  // restart the CSS entrance animation even if a caption is already showing
+  el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+  document.getElementById('storyCaptionIcon').textContent = icon;
+  document.getElementById('storyCaptionText').textContent = text;
+  storyCaptionHideTimer = setTimeout(()=>{
+    el.classList.add('leaving');
+    storyCaptionRemoveTimer = setTimeout(()=>{ el.hidden = true; el.classList.remove('leaving'); }, 320);
+  }, 4200);
+}
+function checkStoryEvents(currentIso){
+  if(!state.storyMode) return;
+  while(state.storyNextIdx < state.storyEvents.length && currentIso >= state.storyEvents[state.storyNextIdx].at){
+    const ev = state.storyEvents[state.storyNextIdx];
+    showStoryCaption(ev.icon, ev.text);
+    state.storyNextIdx++;
+  }
+}
+function startStoryMode(){
+  state.storyMode = true;
+  state.storyNextIdx = 0;
+  switchView('monitor');
+  setFrame(0);
+  if(applySpeed) applySpeed((TOTAL_FRAMES-1)/(BASE_FPS_PER_X*STORY_TARGET_SECONDS));
+  state.playing = true;
+  state.lastTs = null;
+  if(playBtn) playBtn.textContent = '❚❚';
+  const btn = document.getElementById('playStoryBtn');
+  if(btn){ btn.classList.add('playing'); btn.textContent = '❚❚ Playing story…'; }
+}
+function stopStoryMode(){
+  if(!state.storyMode) return;
+  state.storyMode = false;
+  const btn = document.getElementById('playStoryBtn');
+  if(btn){ btn.classList.remove('playing'); btn.textContent = '▶ Play the Story'; }
+}
+function initStoryUI(){
+  state.storyEvents = buildStoryEvents();
+
+  const modal = document.getElementById('introModal');
+  const dontShow = document.getElementById('introDontShow');
+  const seen = localStorage.getItem('resq_intro_seen');
+  if(!seen) modal.hidden = false;
+
+  function dismissModal(){
+    modal.hidden = true;
+    if(dontShow.checked) localStorage.setItem('resq_intro_seen', '1');
+  }
+  document.getElementById('introPlayStory').addEventListener('click', ()=>{
+    dismissModal();
+    startStoryMode();
+  });
+  document.getElementById('introExplore').addEventListener('click', dismissModal);
+
+  document.getElementById('playStoryBtn').addEventListener('click', ()=>{
+    if(state.storyMode){
+      stopStoryMode();
+      state.playing = false;
+      if(playBtn) playBtn.textContent = '▶';
+    } else {
+      startStoryMode();
+    }
   });
 }
 
@@ -680,6 +824,7 @@ function render(){
   updateRelayLayers(currentIso);
   updateSurvivorLayers(currentIso);
   updateSupplyLayers(currentIso);
+  checkStoryEvents(currentIso);
 
   // Keep whatever's currently on screen live during playback — otherwise
   // Phase 2's progress would only ever update the instant you first open it.
@@ -693,7 +838,7 @@ function tick(ts){
   state.lastTs = ts;
   if(state.playing){
     state.frameFloat += state.speed*BASE_FPS_PER_X*dt;
-    if(state.frameFloat>=TOTAL_FRAMES-1){ state.frameFloat=TOTAL_FRAMES-1; state.playing=false; playBtn.textContent='▶'; }
+    if(state.frameFloat>=TOTAL_FRAMES-1){ state.frameFloat=TOTAL_FRAMES-1; state.playing=false; playBtn.textContent='▶'; stopStoryMode(); }
     state.frameIndex = Math.floor(state.frameFloat);
     render();
   }
@@ -899,7 +1044,8 @@ function renderPhase1Tab(c){
 
   const modelParams = Object.entries(c.phase_1.model_params || {})
     .filter(([k,v])=> typeof v !== 'object')
-    .map(([k,v])=>`<code>${k}=${v}</code>`).join(' ');
+    .map(([k,v])=>tooltipChip(`${k}=${v}`, k)).join(' ');
+  const modelNameChip = tooltipChip(c.phase_1.model, c.phase_1.model);
 
   const damageCardHtml = damageAssessmentCardHtml(c.phase_1.damage_by_station);
 
@@ -911,7 +1057,7 @@ function renderPhase1Tab(c){
         <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--text-faint);margin-top:6px">
           <span>${formatLabel(FRAME_ISO[lo])}</span><span>Crossed threshold (${Math.round(TRIGGER_THRESHOLD*100)}%) → ${formatLabel(c.detected_at)}</span>
         </div>
-        <div class="model-note">${c.phase_1.summary}<br>Model: <code>${c.phase_1.model}</code> ${modelParams}</div>
+        <div class="model-note">${c.phase_1.summary}<br>Model: ${modelNameChip} ${modelParams}</div>
       </div>
       <div class="card">
         <h3>Fired Sensors</h3>
@@ -988,6 +1134,7 @@ async function init(){
     gaugeFlood = buildGauge(probPanel, 'Cloudburst / Flood Risk');
     gaugeQuake = buildGauge(probPanel, 'Seismic Risk');
     initTransport();
+    initStoryUI();
     renderCasesView();
     render();
     requestAnimationFrame(tick);

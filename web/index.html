@@ -28,6 +28,25 @@
     <button id="retryBtn" class="retry-btn">Retry</button>
   </div>
 </div>
+<div id="introModal" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <div class="modal-brand"><span class="brand-mark"></span>SENTINEL&nbsp;HIMALAYAS</div>
+    <h1>A live disaster detection &amp; response monitor</h1>
+    <p>This simulates a real cloudburst/GLOF event from Sikkim (October 2023) alongside a hypothetical earthquake — both playing out on the same 5-day timeline. Sensor readings feed real statistical detection models that decide, on their own, when a disaster is happening. Once detected, a <strong>Case</strong> opens and tracks three response phases: <strong>Detection</strong>, <strong>Search &amp; Connectivity</strong>, and <strong>Relief Delivery</strong> — all driven by real generated schedules, not scripted animation.</p>
+    <p class="modal-sub">Everything you see — probabilities, relay deployments, survivor counts, delivery weights — is computed from the underlying data, not staged.</p>
+    <div class="modal-actions">
+      <button class="modal-btn-primary" id="introPlayStory">▶ Play the Story (~50s)</button>
+      <button class="modal-btn-secondary" id="introExplore">Explore freely</button>
+    </div>
+    <label class="modal-dontshow"><input type="checkbox" id="introDontShow">Don't show this again</label>
+  </div>
+</div>
+
+<div id="storyCaption" class="story-caption" hidden>
+  <span id="storyCaptionIcon">⚠</span>
+  <span id="storyCaptionText"></span>
+</div>
+
 <div id="app">
   <header class="topbar">
     <div class="brand"><span class="brand-mark"></span><span class="brand-label">SENTINEL&nbsp;HIMALAYAS</span></div>
@@ -36,6 +55,7 @@
       <div class="nav-tab" data-view="cases">Cases<span class="badge-count" id="casesBadge" style="display:none">0</span></div>
     </nav>
     <div class="topbar-right">
+      <button class="story-btn" id="playStoryBtn" title="Auto-play with narrated captions">▶ Play the Story</button>
       <div class="sys-status"><span class="sys-dot"></span><span class="sys-label">LIVE FEED NOMINAL</span></div>
       <div class="clock" id="clock">—</div>
     </div>

@@ -39,6 +39,11 @@ async function desktopPass() {
   await page.goto(BASE, { waitUntil: 'networkidle' });
   await page.waitForSelector('#loadingOverlay[hidden]', { timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(500);
+
+  check('intro modal shown on first visit', await page.locator('#introModal').isVisible());
+  await page.screenshot({ path: shot('00-intro-modal') });
+  await page.locator('#introExplore').click();
+  check('intro modal dismissed after Explore freely', await page.locator('#introModal').isHidden());
   await page.screenshot({ path: shot('01-monitor-initial') });
 
   check('2 gauges rendered', await page.locator('.gauge-card').count() === 2);
@@ -84,6 +89,7 @@ async function desktopPass() {
   check('case detail phase 1 has a probability chart', await page.locator('#tab-p1 svg').count() > 0);
   // .innerText() reflects rendered text, and .card h3 is CSS text-transform:uppercase — compare case-insensitively.
   check('case detail shows damage assessment heat map', (await page.locator('#tab-p1').innerText()).toLowerCase().includes('damage / infrastructure assessment'));
+  check('phase 1 jargon terms have plain-language tooltips', await page.locator('#tab-p1 .info-chip .info-tooltip').count() > 0);
 
   await page.locator('.tab[data-tab="p2"]').click();
   await page.waitForTimeout(100);
@@ -209,6 +215,7 @@ async function mobilePass() {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(BASE, { waitUntil: 'networkidle' });
   await page.waitForTimeout(800);
+  await page.locator('#introExplore').click();
   await page.screenshot({ path: shot('07-mobile-monitor'), fullPage: true });
 
   const headerBox = await page.locator('header.topbar').boundingBox();
@@ -228,6 +235,7 @@ async function speedControlPass() {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await page.goto(BASE, { waitUntil: 'networkidle' });
   await page.waitForTimeout(500);
+  await page.locator('#introExplore').click();
   await page.locator('#durationInput').fill('4');
   await page.locator('#durationInput').press('Tab');
   const t0 = Date.now();
@@ -235,6 +243,33 @@ async function speedControlPass() {
   await page.waitForFunction(() => document.getElementById('playBtn').textContent === '▶', { timeout: 15000 });
   const actualSeconds = (Date.now() - t0) / 1000;
   check('playback set to "finish in 4s" actually finishes in ~4s', Math.abs(actualSeconds - 4) < 1.5);
+  await page.close();
+}
+
+async function storyModePass() {
+  // Isolated page: drives its own fast full playthrough to confirm the
+  // guided "Play the Story" mode actually fires narrated captions built
+  // from the real per-case schedules, and cleanly exits at the end.
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(500);
+
+  check('intro modal offers Play the Story', await page.locator('#introPlayStory').isVisible());
+  await page.locator('#introPlayStory').click();
+  await page.waitForTimeout(300);
+  check('play button enters playing state when story starts from intro', (await page.locator('#playBtn').textContent()) === '❚❚');
+  check('header story button shows playing state', await page.locator('#playStoryBtn.playing').count() === 1);
+
+  await page.waitForFunction(() => !document.getElementById('storyCaption').hidden, { timeout: 5000 }).catch(() => {});
+  check('a narrated caption appears during story playback', await page.locator('#storyCaptionText').innerText().then((t) => t.length > 0));
+  await page.screenshot({ path: shot('10-story-caption') });
+
+  // Speed up the rest of the story so this pass doesn't sit through the full ~50s.
+  await page.locator('#durationInput').fill('3');
+  await page.locator('#durationInput').press('Tab');
+  await page.waitForFunction(() => document.getElementById('playBtn').textContent === '▶', { timeout: 15000 });
+  check('story mode auto-exits when playback reaches the end', await page.locator('#playStoryBtn.playing').count() === 0);
+
   await page.close();
 }
 
@@ -251,6 +286,7 @@ async function errorStatePass() {
 await desktopPass();
 await mobilePass();
 await speedControlPass();
+await storyModePass();
 await errorStatePass();
 await browser.close();
 
