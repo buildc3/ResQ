@@ -211,5 +211,5 @@ export function runEarthquake() {
     result.estimatedEpicenter = { lat: Math.round(latEst * 10000) / 10000, lon: Math.round(lonEst * 10000) / 10000 };
   }
 
-  return { frames, stationProbFrames, regionalProbability, detectionResult: result };
+  return { frames, stationProbFrames, regionalProbability, detectionResult: result, stationAmp, stationDistance, timesMs };
 }

@@ -24,8 +24,9 @@ web/
 | `mathUtils.ts` | Haversine distance, rolling mean/std/z-score, sigmoid, waveform helpers, naive-timestamp arithmetic |
 | `cloudburst.ts` | Generates the cloudburst/GLOF sensor series **and** runs the rolling z-score fusion detector on it, in one pass |
 | `earthquake.ts` | Generates the 1Hz mainshock+aftershock seismic series **and** runs the STA/LTA detector on it |
+| `damageGrid.ts` | Simulated computer-vision damage/infrastructure assessment — a 0-10 severity heat map on a spatial grid |
 | `cases.ts` | Turns a triggered detection into a Case object (the schema the UI reads) |
-| `build.ts` | Orchestrator — runs both scenarios, writes the 8 JSON files straight into `data/` |
+| `build.ts` | Orchestrator — runs both scenarios, writes the 10 JSON files straight into `data/` |
 
 Run it directly:
 ```
@@ -62,6 +63,7 @@ Connect the repo in Netlify — `npm install && npm run build` runs entirely on 
 - **Gauges**: a 5-frame rolling median of the regional probability curves, purely for a calmer live display (see QA notes below) — the underlying raw curve and all trigger/case logic are untouched.
 - **Case reveal**: cases (`cases.json`) become visible in the UI the moment the timeline's current frame timestamp reaches each case's real `detected_at`.
 - **Case detail → Phase 1**: real model name/params/summary, the actual contributing/corridor stations, and real sensor readings at the detection frame. Phase 2/3 are explicit placeholders since those phases aren't simulated yet.
+- **Damage heat map**: a toggleable color-graded overlay on the Monitor map (`Damage heat map` checkbox, bottom-right) and a static snapshot in Case Detail's Phase 1 tab. This simulates a computer-vision damage-assessment pass — there's no real imagery, so severity (0-10, light red → heavy red) is computed by distance-weighting each station's *raw physical sensor magnitude* (rainfall + water-level rise for cloudburst, seismic amplitude for earthquake) onto a spatial grid. It's deliberately a separate metric from the detection probability above it — one answers "is this statistically anomalous," the other "how physically severe does it look" — not the same signal recolored.
 
 Timestamps are treated as plain fixed-width ISO strings throughout (never parsed through `Date()` in the browser), since they're naive local (Sikkim) times with no timezone suffix. The pipeline's own date arithmetic uses `Date.UTC()`/`getUTC*()` consistently as an arbitrary internal representation — never the visitor's local timezone — so generation is reproducible regardless of where `npm run build` executes (a real concern once Netlify runs it in some unknown-timezone build container).
 

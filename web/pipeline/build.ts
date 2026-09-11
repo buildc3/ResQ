@@ -11,12 +11,31 @@ import { STATIONS, EARTHQUAKE_EPICENTER } from './stations.js';
 import { runCloudburst } from './cloudburst.js';
 import { runEarthquake } from './earthquake.js';
 import { buildCloudburstCase, buildEarthquakeCase } from './cases.js';
+import { buildCloudburstDamageGrid, buildEarthquakeDamageGrid, type DamageGridPayload } from './damageGrid.js';
 
 const OUT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data');
 
 function writeJson(name: string, data: unknown) {
   writeFileSync(path.join(OUT_DIR, name), JSON.stringify(data));
   console.log(`wrote ${name}`);
+}
+
+/** Last frame index at or before a given ISO timestamp (frames are 10-min; a
+ *  detection can land mid-frame, e.g. the earthquake's second-level timestamp). */
+function frameIndexAtOrBefore(frames: { timestamp: string }[], iso: string): number {
+  let lo = 0;
+  let hi = frames.length - 1;
+  let ans = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (frames[mid].timestamp <= iso) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return ans;
+}
+
+function damageSnapshotAt(grid: DamageGridPayload, iso: string) {
+  const idx = frameIndexAtOrBefore(grid.frames, iso);
+  return { cells: grid.cells, values: grid.frames[idx].values };
 }
 
 function main() {
@@ -51,7 +70,20 @@ function main() {
   writeJson('earthquake_station_probability_frames.json', eq.stationProbFrames);
   console.log(`  triggered=${eq.detectionResult.triggered} detectedAt=${eq.detectionResult.detectedAt ?? '—'}`);
 
-  const cases = [buildCloudburstCase(cb.detectionResult), buildEarthquakeCase(eq.detectionResult)].filter(Boolean);
+  console.log('Building damage/infrastructure severity heat maps...');
+  const cbDamage = buildCloudburstDamageGrid(cb.series, cb.timesMs);
+  const stationAmpBinned: Record<string, number[]> = {};
+  for (const s of STATIONS) stationAmpBinned[s.id] = eq.frames.map((f) => f.stations[s.id].seismic_amplitude as number);
+  const eqDamage = buildEarthquakeDamageGrid(stationAmpBinned, eq.frames.map((f) => f.timestamp));
+  writeJson('cloudburst_damage_grid.json', cbDamage);
+  writeJson('earthquake_damage_grid.json', eqDamage);
+
+  const cbCase = buildCloudburstCase(cb.detectionResult);
+  if (cbCase) (cbCase.phase_1 as Record<string, unknown>).damage_grid = damageSnapshotAt(cbDamage, cbCase.detected_at!);
+  const eqCase = buildEarthquakeCase(eq.detectionResult);
+  if (eqCase) (eqCase.phase_1 as Record<string, unknown>).damage_grid = damageSnapshotAt(eqDamage, eqCase.detected_at!);
+
+  const cases = [cbCase, eqCase].filter(Boolean);
   writeJson('cases.json', cases);
   console.log(`wrote ${cases.length} case(s)`);
 }

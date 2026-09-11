@@ -33,7 +33,7 @@ const WEIGHTS_WITH_LEVEL = { rainfall: 0.3, waterLevelRate: 0.5, tremor: 0.2 };
 const WEIGHTS_NO_LEVEL = { rainfall: 0.6, tremor: 0.4 };
 const MIN_STD = { rainfall: 1.5, waterLevelRate: 0.05, tremor: 0.01 };
 
-interface StationSeries {
+export interface StationSeries {
   station: Station;
   rainfall: number[];
   waterLevel: (number | null)[];
@@ -215,7 +215,14 @@ export function runCloudburst() {
     result.peakProbabilityAt = regionalProbability[peakIdx].timestamp;
   }
 
-  return { frames, stationProbFrames, regionalProbability: regionalProbability.map(({ timestamp, probability }) => ({ timestamp, probability })), detectionResult: result };
+  return {
+    frames,
+    stationProbFrames,
+    regionalProbability: regionalProbability.map(({ timestamp, probability }) => ({ timestamp, probability })),
+    detectionResult: result,
+    series,
+    timesMs,
+  };
 }
 
 function STATION_HAS_LEVEL(id: string): boolean {

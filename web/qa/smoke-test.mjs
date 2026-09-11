@@ -43,7 +43,9 @@ async function desktopPass() {
 
   check('2 gauges rendered', await page.locator('.gauge-card').count() === 2);
   check('7 station rows rendered', await page.locator('.station-row').count() === 7);
-  check('map legend visible', await page.locator('.legend').isVisible());
+  check('map legend visible', await page.locator('.legend').first().isVisible());
+  check('damage heat map legend visible', await page.locator('.damage-legend').isVisible());
+  check('damage heat map cells rendered', await page.locator('path.damage-cell').count() > 0);
 
   await page.locator('.station-row').nth(2).click();
   await page.waitForTimeout(150);
@@ -66,6 +68,8 @@ async function desktopPass() {
   await page.waitForTimeout(150);
   await page.screenshot({ path: shot('04-case-detail-p1') });
   check('case detail phase 1 has a probability chart', await page.locator('#tab-p1 svg').count() > 0);
+  // .innerText() reflects rendered text, and .card h3 is CSS text-transform:uppercase — compare case-insensitively.
+  check('case detail shows damage assessment heat map', (await page.locator('#tab-p1').innerText()).toLowerCase().includes('damage / infrastructure assessment'));
 
   await page.locator('.tab[data-tab="p2"]').click();
   await page.waitForTimeout(100);
@@ -75,6 +79,12 @@ async function desktopPass() {
   await page.waitForTimeout(100);
   await page.locator('.nav-tab[data-view="monitor"]').click();
   await page.waitForTimeout(100);
+
+  await page.locator('#damageToggle').uncheck();
+  await page.waitForTimeout(150);
+  const firstRectDisplay = await page.locator('path.damage-cell').first().evaluate(el => getComputedStyle(el).display);
+  check('damage heat map hides when toggled off', firstRectDisplay === 'none');
+  await page.locator('#damageToggle').check();
 
   const box2 = await track.boundingBox();
   await page.mouse.click(box2.x + box2.width * 0.99, box2.y + box2.height / 2);
