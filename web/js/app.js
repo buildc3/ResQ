@@ -1217,7 +1217,7 @@ function renderPhase1Tab(c){
     .map(([k,v])=>tooltipChip(`${k}=${v}`, k)).join(' ');
   const modelNameChip = tooltipChip(c.phase_1.model, c.phase_1.model);
 
-  const damageCardHtml = damageAssessmentCardHtml(c.phase_1.damage_by_station);
+  const damageCardHtml = damageAssessmentCardHtml(c.phase_1.damage_by_station, c.case_id);
 
   document.getElementById('tab-p1').innerHTML = `
     <div class="dgrid">
@@ -1247,12 +1247,24 @@ function renderPhase1Tab(c){
 /* Static damage-severity heat map snapshot (CV-simulated infrastructure
    assessment) at the moment of detection — miniature soft/blurred blobs at
    each tower's real relative position, echoing the live heat layer's look. */
-function damageAssessmentCardHtml(damageByStation){
-  if(!damageByStation) return '';
+/** Builds just the map box (compass + glow/dot/label layers) at whatever
+    size is asked for — shared by the small in-card preview and the full-size
+    expanded modal, so the two never drift out of sync with each other. */
+function damageMapBoxHtml(damageByStation, opts){
+  const { fontSize=9.5, dotSize=7, labelPad='2px 5px' } = opts || {};
   const lats = STATIONS.map(s=>s.lat), lons = STATIONS.map(s=>s.lon);
   const latMin = Math.min(...lats), latMax = Math.max(...lats);
   const lonMin = Math.min(...lons), lonMax = Math.max(...lons);
   const shortCode = (name) => name.slice(0,3).toUpperCase();
+  const off = Math.max(6, Math.round(fontSize*0.7));
+
+  // Two stations placed close together (real geography puts several within
+  // a few km of each other) would otherwise stack their labels directly on
+  // top of one another regardless of size. Nudge a label sideways, away
+  // from whichever earlier-placed marker it's crowding, rather than trying
+  // to flip above/below (which doesn't help when the two markers themselves
+  // are stacked vertically).
+  const placed = [];
 
   const layers = STATIONS.map(s=>{
     const v = damageByStation[s.id] ?? 0;
@@ -1264,22 +1276,33 @@ function damageAssessmentCardHtml(damageByStation){
     // the blurred glow alone reads as an unlabeled abstract painting to
     // anyone who hasn't hovered over it, so the number/name is never hidden
     // behind an interaction.
-    const dot = `<div style="position:absolute;left:${xPct}%;top:${yPct}%;width:7px;height:7px;transform:translate(-50%,-50%);border-radius:50%;background:${damageColor(v)};border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);z-index:2"></div>`;
+    const dot = `<div style="position:absolute;left:${xPct}%;top:${yPct}%;width:${dotSize}px;height:${dotSize}px;transform:translate(-50%,-50%);border-radius:50%;background:${damageColor(v)};border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.35);z-index:2"></div>`;
     const labelBelow = yPct < 78;
+    const nearby = placed.find(p => Math.abs(p.x-xPct) < 14 && Math.abs(p.y-yPct) < 14);
+    const labelXPct = nearby ? xPct + (xPct >= nearby.x ? 9 : -9) : xPct;
+    placed.push({x:xPct, y:yPct});
     // Clamp the label's horizontal anchor near the left/right edges instead
     // of always centering it on the marker — a centered label on an
     // edge-hugging station (real geography puts several right at the box
     // border) would otherwise render half off-canvas, invisible under
     // overflow:hidden.
-    const xAnchor = xPct < 12 ? '0%' : xPct > 88 ? '-100%' : '-50%';
-    const label = `<div title="${s.name}: ${v.toFixed(1)} / 10" style="position:absolute;left:${xPct}%;top:${yPct}%;transform:translate(${xAnchor}, ${labelBelow ? '6px' : '-100%'});margin-top:${labelBelow?'6px':'-6px'};z-index:3;font-family:var(--mono);font-size:9.5px;font-weight:700;white-space:nowrap;background:rgba(20,24,30,.72);color:#fff;padding:2px 5px;border-radius:4px;letter-spacing:.02em">${shortCode(s.name)} ${v.toFixed(1)}</div>`;
+    const xAnchor = labelXPct < 12 ? '0%' : labelXPct > 88 ? '-100%' : '-50%';
+    const label = `<div title="${s.name}: ${v.toFixed(1)} / 10" style="position:absolute;left:${labelXPct}%;top:${yPct}%;transform:translate(${xAnchor}, ${labelBelow ? off+'px' : '-100%'});margin-top:${labelBelow?off+'px':(-off)+'px'};z-index:3;font-family:var(--mono);font-size:${fontSize}px;font-weight:700;white-space:nowrap;background:rgba(20,24,30,.72);color:#fff;padding:${labelPad};border-radius:4px;letter-spacing:.02em">${shortCode(s.name)} ${v.toFixed(1)}</div>`;
     return glow + dot + label;
   }).join('');
 
+  return `<div style="position:absolute;top:8px;left:10px;font-family:var(--mono);font-size:${Math.round(fontSize*1.05)}px;font-weight:700;color:var(--text-faint);z-index:3">N ↑</div>${layers}`;
+}
+
+function damageAssessmentCardHtml(damageByStation, caseId){
+  if(!damageByStation) return '';
   return `
     <div class="card" style="grid-column:1/-1">
-      <h3>Damage / Infrastructure Assessment (simulated CV pass)</h3>
-      <p style="font-size:12px;color:var(--text-dim);line-height:1.55;margin:2px 0 12px;max-width:620px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <h3 style="margin-bottom:0">Damage / Infrastructure Assessment (simulated CV pass)</h3>
+        <button class="damage-expand-btn" data-case-id="${caseId}" title="Open a larger, easier-to-read view">⤢ Expand map</button>
+      </div>
+      <p style="font-size:12px;color:var(--text-dim);line-height:1.55;margin:10px 0 12px;max-width:620px">
         Stands in for a computer-vision pass over post-disaster aerial/satellite imagery: each station's surroundings
         get a structural-damage severity score from <strong>0</strong> (minimal) to <strong>10</strong> (severe), read
         directly from that station's own raw sensor intensity. This is deliberately a separate signal from the
@@ -1287,14 +1310,26 @@ function damageAssessmentCardHtml(damageByStation){
         "how physically severe does it look on the ground."
       </p>
       <div style="position:relative;width:100%;max-width:420px;height:210px;background:var(--panel-2);border:1px solid var(--border-soft);border-radius:8px;overflow:hidden">
-        <div style="position:absolute;top:8px;left:10px;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--text-faint);z-index:3">N ↑</div>
-        ${layers}
+        ${damageMapBoxHtml(damageByStation, {})}
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11px;color:var(--text-dim)">
         <span>0</span><div class="damage-scale-bar" style="flex:none"></div><span>10</span>
-        <span style="margin-left:10px">Labels show each station's 3-letter code and severity at time of detection — hover a marker for the full name.</span>
+        <span style="margin-left:10px">Labels show each station's 3-letter code and severity at time of detection — click "Expand map" for a larger view, or hover a marker for the full name.</span>
       </div>
     </div>`;
+}
+
+function openDamageMapModal(caseId){
+  const c = CASES.find(x=>x.case_id===caseId);
+  if(!c || !c.phase_1.damage_by_station) return;
+  document.getElementById('damageMapModalTitle').textContent =
+    `${DISASTER_LABEL[c.disaster_type] || c.disaster_type} — Damage / Infrastructure Assessment`;
+  document.getElementById('damageMapModalBox').innerHTML =
+    damageMapBoxHtml(c.phase_1.damage_by_station, { fontSize:13, dotSize:10, labelPad:'4px 8px' });
+  document.getElementById('damageMapModal').hidden = false;
+}
+function closeDamageMapModal(){
+  document.getElementById('damageMapModal').hidden = true;
 }
 
 // Div-based controls (nav tabs, detail tabbar, back link) aren't natively
@@ -1330,6 +1365,23 @@ document.addEventListener('DOMContentLoaded', ()=>{
   });
   document.querySelectorAll('.tab').forEach(tab=>{
     makeKeyboardActionable(tab, ()=> tab.click());
+  });
+
+  // Damage/infrastructure map: the in-card preview is deliberately small,
+  // so an "Expand map" button (rendered fresh into the DOM every time
+  // Phase 1 re-renders) opens the same visualization at a size actually
+  // usable for reading every station's label at once. Delegated on the
+  // document since the button itself is recreated on every render.
+  document.addEventListener('click', e=>{
+    const btn = e.target.closest('.damage-expand-btn');
+    if(btn) openDamageMapModal(btn.dataset.caseId);
+  });
+  document.getElementById('damageMapModalClose').addEventListener('click', closeDamageMapModal);
+  document.getElementById('damageMapModal').addEventListener('click', e=>{
+    if(e.target.id==='damageMapModal') closeDamageMapModal();
+  });
+  document.addEventListener('keydown', e=>{
+    if(e.key==='Escape' && !document.getElementById('damageMapModal').hidden) closeDamageMapModal();
   });
 });
 

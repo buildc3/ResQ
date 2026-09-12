@@ -45,7 +45,7 @@ web/                Netlify-deployable npm project (netlify.toml's build base)
   pipeline/            TypeScript: synthetic sensor generation + detection models
   data/                pipeline output (JSON) — regenerated fresh every build
   index.html/css/js    the frontend: vanilla HTML/CSS/JS + Leaflet, no framework
-  qa/                  headless-browser QA (Playwright) — 55 automated checks
+  qa/                  headless-browser QA (Playwright) — 60 automated checks
   README.md            architecture deep-dive: algorithms, data schema, UI wiring
 
 netlify.toml         build = "npm run build" (base: web) — Node only
@@ -124,7 +124,7 @@ sequenceDiagram
 cd web
 npm install
 npm run dev   # generates data + runs detection, serves on http://localhost:8000
-npm run qa    # headless-browser QA pass (55 checks)
+npm run qa    # headless-browser QA pass (60 checks)
 ```
 
 - Deploy: push to a git remote, connect the repo in Netlify — `netlify.toml` handles the rest, no manual env vars needed.

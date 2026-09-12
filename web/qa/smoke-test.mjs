@@ -108,6 +108,18 @@ async function desktopPass() {
   check('case detail shows damage assessment heat map', (await page.locator('#tab-p1').innerText()).toLowerCase().includes('damage / infrastructure assessment'));
   check('phase 1 jargon terms have plain-language tooltips', await page.locator('#tab-p1 .info-chip .info-tooltip').count() > 0);
   check('damage heat map shows per-station labels, not just unlabeled blobs', await page.locator('#tab-p1 .card').last().innerText().then(t => /[A-Z]{3}\s+\d+\.\d/.test(t)));
+
+  // "Expand map" opens a larger, easier-to-read version of the same damage
+  // assessment visualization — the in-card preview alone is too small to
+  // actually read every station's label at once.
+  await page.locator('.damage-expand-btn').click();
+  await page.waitForTimeout(200);
+  check('expand map opens a larger damage assessment view', await page.locator('#damageMapModal').isVisible());
+  const modalBoxHeight = await page.locator('#damageMapModalBox').evaluate(el => el.getBoundingClientRect().height);
+  check('expanded map is meaningfully larger than the in-card preview', modalBoxHeight > 300);
+  await page.locator('#damageMapModalClose').click();
+  await page.waitForTimeout(150);
+  check('expand map modal closes', await page.locator('#damageMapModal').isHidden());
   check('case impact snapshot shows response-speed stats', await page.locator('#caseImpactStrip .impact-stat').count() === 4);
 
   await page.locator('.tab[data-tab="p2"]').click();

@@ -47,6 +47,20 @@
   <span id="storyCaptionText"></span>
 </div>
 
+<div id="damageMapModal" class="modal-overlay damage-map-modal-overlay" hidden>
+  <div class="modal-card damage-map-modal-card">
+    <div class="damage-map-modal-head">
+      <h1 id="damageMapModalTitle">Damage / Infrastructure Assessment</h1>
+      <button class="modal-btn-secondary" id="damageMapModalClose">✕ Close</button>
+    </div>
+    <div class="damage-map-modal-box" id="damageMapModalBox"></div>
+    <div class="damage-map-modal-legend">
+      <span>0</span><div class="damage-scale-bar"></div><span>10</span>
+      <span style="margin-left:10px">Each marker's 3-letter code and severity (0-10) at time of detection — hover a marker for the full station name.</span>
+    </div>
+  </div>
+</div>
+
 <div id="app">
   <header class="topbar">
     <div class="brand"><span class="brand-mark"></span><span class="brand-label">SENTINEL&nbsp;HIMALAYAS</span></div>
