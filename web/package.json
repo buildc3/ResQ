@@ -1,7 +1,7 @@
 {
   "name": "resq-detection-monitor",
   "version": "1.0.0",
-  "description": "Sikkim Disaster Detection Monitor — Phase 1 time-lapse UI for ResQ",
+  "description": "ResQ — a live disaster detection and response monitor: sensor-fusion detection, search & connectivity, and relief delivery, played back as a time-lapse.",
   "private": true,
   "type": "module",
   "scripts": {

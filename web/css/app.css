@@ -136,6 +136,20 @@ header.topbar{display:flex;align-items:center;gap:24px;padding:0 20px;height:52p
 .time-label{font-family:var(--mono);font-size:12px;color:var(--text);flex:none;width:150px;text-align:right}
 .time-range{font-family:var(--mono);font-size:10px;color:var(--text-faint);flex:none}
 
+/* Below ~600px, the fixed-width controls (play button, speed slider,
+   time-range text, time-label) add up to more than the viewport itself,
+   which used to squeeze .scrub-wrap's flex:1 all the way down to 0 width —
+   silently deleting the single most important control (the timeline
+   scrubber) on any phone-sized screen. Dropping the redundant time-range
+   text and giving the scrub bar its own full-width row fixes this for good
+   rather than just buying a few more pixels. */
+@media (max-width:600px){
+  .transport{flex-wrap:wrap;row-gap:8px}
+  .time-range{display:none}
+  .scrub-wrap{order:3;flex:1 1 100%}
+  .time-label{width:auto;margin-left:auto}
+}
+
 /* case list */
 .cases-body{flex:1;padding:20px 24px;overflow-y:auto}
 .cases-header{display:flex;align-items:baseline;gap:10px;margin-bottom:16px}

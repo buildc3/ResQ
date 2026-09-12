@@ -87,7 +87,7 @@ Timestamps are treated as plain fixed-width ISO strings throughout (never parsed
 ```
 npm run qa
 ```
-Runs a headless-Chromium (Playwright) pass against the real served app — 51 checks covering data load, every phase's live-update behavior, the speed control's actual timing, accessibility (keyboard operability, colorblind-safe indicators), the onboarding/story mode, and error states. See inline comments in `qa/smoke-test.mjs` for exactly what's checked. Screenshots land in `qa/shots/` (gitignored).
+Runs a headless-Chromium (Playwright) pass against the real served app — 55 checks covering data load, every phase's live-update behavior, the speed control's actual timing, accessibility (keyboard operability, colorblind-safe indicators), the onboarding/story mode, and error states. See inline comments in `qa/smoke-test.mjs` for exactly what's checked. Screenshots land in `qa/shots/` (gitignored).
 
 ## What happened to the Python pipeline?
 

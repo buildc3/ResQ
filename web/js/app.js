@@ -1099,7 +1099,7 @@ function renderCaseDetail(c){
 
   renderPhase1Tab(c);
   renderPhase2Tab(c, p2);
-  renderPhase3Tab(c, p3);
+  renderPhase3Tab(c, p3, currentIso);
 
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===state.activeDetailTab));
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.toggle('active', t.id==='tab-'+state.activeDetailTab));
@@ -1144,14 +1144,18 @@ function renderPhase2Tab(c, p2){
     </div>`;
 }
 
-function renderPhase3Tab(c, p3){
+function renderPhase3Tab(c, p3, currentIso){
   const medRows = p3.meds.map(m=>{
     const delivered = p3.medDelivered.includes(m);
+    const dispatched = currentIso >= m.dispatched_at;
     const name = STATION_LOOKUP[m.station_id].name;
+    const icon = delivered ? '✓' : dispatched ? '◐' : '○';
     const label = delivered
       ? `delivered ${formatLabel(m.delivered_at)} · ${m.payload_kg}kg`
-      : `en route since ${formatLabel(m.dispatched_at)} · ${m.payload_kg}kg`;
-    return `<div class="fired-row"><span class="n">${delivered?'✓':'○'} ${name}</span><span class="v">${label}</span></div>`;
+      : dispatched
+        ? `en route since ${formatLabel(m.dispatched_at)} · ${m.payload_kg}kg`
+        : `pending · dispatching ${formatLabel(m.dispatched_at)} · ${m.payload_kg}kg`;
+    return `<div class="fired-row"><span class="n">${icon} ${name}</span><span class="v">${label}</span></div>`;
   }).join('');
 
   const byStation = {};
@@ -1160,9 +1164,10 @@ function renderPhase3Tab(c, p3){
     const delivered = sorties.filter(s=>p3.sortiesDelivered.includes(s));
     const name = STATION_LOOKUP[stationId].name;
     const next = sorties.find(s=>!p3.sortiesDelivered.includes(s));
-    const label = next
-      ? `${delivered.length}/${sorties.length} sorties · next ${formatLabel(next.dispatched_at)}`
-      : `${delivered.length}/${sorties.length} sorties · last delivered ${formatLabel(sorties[sorties.length-1].delivered_at)}`;
+    let label;
+    if(!next) label = `${delivered.length}/${sorties.length} sorties · last delivered ${formatLabel(sorties[sorties.length-1].delivered_at)}`;
+    else if(currentIso >= next.dispatched_at) label = `${delivered.length}/${sorties.length} sorties · en route, arriving ${formatLabel(next.delivered_at)}`;
+    else label = `${delivered.length}/${sorties.length} sorties · next dispatch ${formatLabel(next.dispatched_at)}`;
     return `<div class="fired-row"><span class="n">${delivered.length===sorties.length?'✓':'◐'} ${name}</span><span class="v">${label}</span></div>`;
   }).join('');
 

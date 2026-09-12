@@ -67,6 +67,20 @@ async function desktopPass() {
   await page.locator('#durationInput').fill('120'); // back to ~1x so it doesn't race ahead of the timed clicks below
   await page.locator('#durationInput').press('Tab');
 
+  // Before any disaster is detected, no relay/survivor/supply marker should
+  // be visible yet — all three are pre-created hidden and only revealed once
+  // the playhead reaches their real scheduled timestamp.
+  const preDetectionVisibility = await page.evaluate(() => {
+    const visible = (el, prop) => getComputedStyle(el)[prop] !== '0';
+    return {
+      relay: Array.from(document.querySelectorAll('path.relay-marker')).filter(e => visible(e, 'fillOpacity')).length,
+      survivor: Array.from(document.querySelectorAll('path.survivor-marker')).filter(e => visible(e, 'fillOpacity')).length,
+      supply: Array.from(document.querySelectorAll('path.supply-marker')).filter(e => visible(e, 'strokeOpacity')).length,
+    };
+  });
+  check('no relay/survivor/supply markers visible before any disaster is detected',
+    preDetectionVisibility.relay === 0 && preDetectionVisibility.survivor === 0 && preDetectionVisibility.supply === 0);
+
   await page.locator('.station-row').nth(2).click();
   await page.waitForTimeout(150);
   check('station detail shows selected station', (await page.locator('#stationDetail').innerText()).includes('Mangan'));
@@ -109,6 +123,12 @@ async function desktopPass() {
   check('phase 3 shows medical supply delivery', p3Text.includes('medical supply delivery'));
   check('phase 3 shows relief sorties', p3Text.includes('relief sorties') && p3Text.includes('kg total aid delivered'));
   check('phase 3 explains medical/heavy payload drones in plain language', p3Text.includes('medical supply drone') && p3Text.includes('heavy payload'));
+  // Regression guard: a not-yet-dispatched delivery must read "pending",
+  // never "en route since <a time that hasn't happened yet>" — this exact
+  // scenario (several zones still waiting on their relay at this point in
+  // the timeline) previously mislabeled every undelivered row as already
+  // en route regardless of whether its dispatch time had actually passed.
+  check('phase 3 never claims a future-dispatched delivery is already en route', p3Text.includes('pending') && p3Text.includes('dispatching'));
   await page.locator('.tab[data-tab="p2"]').click();
   await page.waitForTimeout(100);
 
@@ -157,8 +177,13 @@ async function desktopPass() {
   check('survivor markers exist on the map', survivorCount > 0);
   check('all survivor markers found by end of timeline', survivorCount > 0 && survivorFoundCount === survivorCount);
 
+  // Supply markers are stroke-only (fill:false) rings — Leaflet's `opacity`
+  // path option maps to the stroke-opacity SVG attribute for a fill:false
+  // path, not the CSS `opacity` property, which stays "1" the entire time
+  // regardless of real visibility. Must read strokeOpacity, or this check
+  // would pass even if markers never appeared at all.
   const supplyCount = await page.locator('path.supply-marker').count();
-  const supplyDeliveredCount = await page.locator('path.supply-marker').evaluateAll(els => els.filter(e => getComputedStyle(e).opacity !== '0').length);
+  const supplyDeliveredCount = await page.locator('path.supply-marker').evaluateAll(els => els.filter(e => getComputedStyle(e).strokeOpacity !== '0').length);
   check('supply markers exist on the map', supplyCount > 0);
   check('all supply markers delivered by end of timeline', supplyCount > 0 && supplyDeliveredCount === supplyCount);
 
@@ -230,6 +255,14 @@ async function mobilePass() {
   const headerBox = await page.locator('header.topbar').boundingBox();
   check('mobile header does not overflow viewport width', headerBox.width <= 390 + 1);
 
+  // Regression guard: the transport bar's other fixed-width controls (play
+  // button, speed slider, time-range/time-label text) used to add up to
+  // more than a phone-width viewport, squeezing the scrub bar's flex:1 down
+  // to 0 width — silently deleting the single most important control (the
+  // timeline scrubber) on any phone-sized screen, with no visible error.
+  const scrubBox = await page.locator('#scrubTrack').boundingBox();
+  check('timeline scrubber has a real, clickable width on mobile', scrubBox.width > 100);
+
   await page.locator('.nav-tab[data-view="cases"]').click();
   await page.waitForTimeout(150);
   await page.screenshot({ path: shot('08-mobile-cases'), fullPage: true });
@@ -249,7 +282,12 @@ async function speedControlPass() {
   await page.locator('#durationInput').press('Tab');
   const t0 = Date.now();
   await page.locator('#playBtn').click();
-  await page.waitForFunction(() => document.getElementById('playBtn').textContent === '▶', { timeout: 15000 });
+  // NOTE: waitForFunction's signature is (pageFunction, arg, options) — a
+  // bare { timeout } object here would bind to `arg`, not `options`, and
+  // silently fall back to Playwright's default (much longer) timeout
+  // instead of the one written here. Passing `undefined` for `arg` first
+  // routes { timeout } to the right parameter.
+  await page.waitForFunction(() => document.getElementById('playBtn').textContent === '▶', undefined, { timeout: 15000 });
   const actualSeconds = (Date.now() - t0) / 1000;
   check('playback set to "finish in 4s" actually finishes in ~4s', Math.abs(actualSeconds - 4) < 1.5);
   await page.close();
@@ -269,14 +307,20 @@ async function storyModePass() {
   check('play button enters playing state when story starts from intro', (await page.locator('#playBtn').textContent()) === '❚❚');
   check('header story button shows playing state', await page.locator('#playStoryBtn.playing').count() === 1);
 
-  await page.waitForFunction(() => !document.getElementById('storyCaption').hidden, { timeout: 5000 }).catch(() => {});
+  // Speed the story up *before* waiting for the first caption — at the
+  // default ~50s target, the cloudburst-detection caption (frame 296/719)
+  // doesn't fire for a genuine ~20 real seconds, which used to be masked by
+  // a waitForFunction call whose { timeout } silently didn't apply (see the
+  // note in speedControlPass above). Fixing the call signature makes a
+  // 5s cap actually mean 5s, so the story is sped up first instead.
+  await page.locator('#durationInput').fill('3');
+  await page.locator('#durationInput').press('Tab');
+
+  await page.waitForFunction(() => !document.getElementById('storyCaption').hidden, undefined, { timeout: 5000 }).catch(() => {});
   check('a narrated caption appears during story playback', await page.locator('#storyCaptionText').innerText().then((t) => t.length > 0));
   await page.screenshot({ path: shot('10-story-caption') });
 
-  // Speed up the rest of the story so this pass doesn't sit through the full ~50s.
-  await page.locator('#durationInput').fill('3');
-  await page.locator('#durationInput').press('Tab');
-  await page.waitForFunction(() => document.getElementById('playBtn').textContent === '▶', { timeout: 15000 });
+  await page.waitForFunction(() => document.getElementById('playBtn').textContent === '▶', undefined, { timeout: 8000 });
   check('story mode auto-exits when playback reaches the end', await page.locator('#playStoryBtn.playing').count() === 0);
 
   await page.close();
@@ -288,6 +332,14 @@ async function errorStatePass() {
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
   const shown = await page.waitForSelector('#errorOverlay:not([hidden])', { timeout: 5000 }).then(() => true).catch(() => false);
   check('error overlay appears on data fetch failure', shown);
+  if (shown) {
+    // Regression guard: this text used to reference the old Python
+    // pipeline's output path and an "npm run sync-data" script, neither of
+    // which exist in the current TypeScript pipeline — actively wrong
+    // troubleshooting advice shown to anyone who actually hits this screen.
+    const errorHelp = (await page.locator('#errorOverlay').innerText()).toLowerCase();
+    check('error overlay references the current (not the retired Python) pipeline', errorHelp.includes('generate-data') && !errorHelp.includes('sync-data'));
+  }
   if (shown) await page.screenshot({ path: shot('09-error-state') });
   await page.close();
 }
