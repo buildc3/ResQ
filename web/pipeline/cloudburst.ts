@@ -12,8 +12,11 @@ import { timeGridMs, formatNaiveIso, parseNaiveIso, gaussianBump, riseAndRecede,
 const STEP_MINUTES = 10;
 const SEED = 42;
 
-const LAKE_BREACH_ONSET = parseNaiveIso('2023-10-04T01:30:00');
-const WAVE_SPEED_KM_PER_H = 15.0;
+// Exported for pipeline/tti.ts's downstream flood-wave TTI reuse.
+export const LAKE_BREACH_ONSET = parseNaiveIso('2023-10-04T01:30:00');
+// Exported for pipeline/tti.ts, which reuses this exact constant for
+// downstream GLOF flood time-to-impact instead of re-deriving it.
+export const WAVE_SPEED_KM_PER_H = 15.0;
 const WATER_LEVEL_DECAY_KM = 45.0;
 
 const RAIN_PEAK_TIME = parseNaiveIso('2023-10-03T21:00:00');
@@ -50,7 +53,8 @@ export interface StationSeries {
   groundTremor: number[];
 }
 
-function onsetTimeMs(basinKm: number): number {
+// Exported for pipeline/tti.ts — the exact formula downstream flood TTI reuses.
+export function onsetTimeMs(basinKm: number): number {
   return LAKE_BREACH_ONSET + (basinKm / WAVE_SPEED_KM_PER_H) * 3600000;
 }
 function peakRiseM(basinKm: number): number {

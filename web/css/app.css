@@ -36,6 +36,16 @@ header.topbar{display:flex;align-items:center;gap:24px;padding:0 20px;height:52p
 .brand-mark{width:9px;height:9px;background:var(--accent);transform:rotate(45deg);flex:none}
 .nav-tabs{display:flex;gap:4px;margin-left:8px;flex:none}
 .nav-tab{position:relative;padding:8px 14px;border-radius:6px;font-size:13px;font-weight:600;color:var(--text-dim);cursor:pointer;display:flex;align-items:center;gap:7px;border:1px solid transparent;white-space:nowrap}
+/* Three nav tabs (Nowcast/Response Module/Cases) is tighter than the
+   original two-tab layout on a phone-width header — shrink padding and
+   drop the "legacy" badge's own label text (keep the tab itself, which
+   still needs to stay reachable) rather than letting the last tab clip
+   off the visible viewport edge. */
+@media (max-width:480px){
+  .nav-tabs{gap:2px}
+  .nav-tab{padding:8px 8px;font-size:12px}
+  .legacy-badge{display:none}
+}
 .nav-tab.active{color:var(--text);background:var(--panel-2);border-color:var(--border)}
 .nav-tab:hover:not(.active){color:var(--text)}
 .badge-count{background:var(--red);color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:8px;font-family:var(--mono)}
@@ -88,6 +98,51 @@ header.topbar{display:flex;align-items:center;gap:24px;padding:0 20px;height:52p
 .damage-toggle input{margin:0;cursor:pointer}
 .damage-scale{display:flex;align-items:center;gap:5px}
 .damage-scale-bar{width:70px;height:8px;border-radius:3px;background:linear-gradient(to right, rgb(46,168,90), rgb(190,210,60), rgb(250,210,40), rgb(250,140,30), rgb(220,30,30))}
+
+/* ==================== SIH26084 nowcast view ==================== */
+.sim-badge{font-family:var(--mono);font-size:9px;font-weight:800;letter-spacing:.04em;color:var(--accent);background:var(--accent-dim);padding:2px 6px;border-radius:4px;margin-left:8px;vertical-align:middle}
+.sim-badge-sm{font-size:8px;padding:1px 5px;margin-left:6px}
+.legacy-badge{font-family:var(--mono);font-size:9px;font-weight:700;color:var(--text-faint);background:var(--panel-2);border:1px solid var(--border-soft);padding:1px 5px;border-radius:4px;margin-left:6px;text-transform:none;letter-spacing:0}
+.legacy-banner{flex:none;padding:9px 16px;background:var(--panel-2);border-bottom:1px solid var(--border);font-size:12px;color:var(--text-dim)}
+
+.nowcast-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 340px;grid-template-rows:minmax(0,1fr);gap:12px;padding:12px;overflow:hidden}
+@media (max-width:980px){.nowcast-body{grid-template-columns:1fr;overflow:auto}}
+.nowcast-side-panel{overflow-y:auto}
+.nowcast-zone-legend{bottom:auto;top:14px;left:auto;right:20px}
+
+.layer-toggle-panel{flex:none;border-top:1px solid var(--border-soft);padding:10px 14px;display:flex;flex-wrap:wrap;gap:18px;align-items:center}
+.layer-toggle-group{display:flex;flex-direction:column;gap:4px}
+.layer-toggle-group-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-faint)}
+.layer-toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer;white-space:nowrap}
+.layer-toggle input{cursor:pointer}
+.layer-toggle-off{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-faint);cursor:pointer}
+
+.lead-time-bar{flex:none;display:flex;align-items:center;gap:12px;padding:9px 16px;background:var(--bg-2);border-top:1px solid var(--border)}
+.lead-time-label{font-size:11px;font-weight:700;color:var(--text-dim);white-space:nowrap}
+#leadTimeSlider{flex:1;max-width:280px;accent-color:var(--accent);cursor:pointer}
+.lead-time-value{font-family:var(--mono);font-size:12px;color:var(--text);white-space:nowrap;min-width:90px}
+.forecast-pending{font-size:11.5px;color:var(--amber);background:oklch(93% 0.05 70);padding:4px 10px;border-radius:5px;white-space:nowrap}
+@media (max-width:760px){.forecast-pending{white-space:normal}}
+
+.ci-status-panel,.tti-panel,.alert-log-panel{padding:12px 14px;font-size:12.5px}
+.ci-pending{color:var(--text-faint);font-size:12px;line-height:1.5}
+.ci-lead-stat{font-family:var(--mono);font-size:28px;font-weight:700;color:var(--accent);display:flex;align-items:baseline;gap:6px}
+.ci-lead-unit{font-size:11px;font-weight:600;color:var(--text-faint)}
+.ci-row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--border-soft);font-size:12px;color:var(--text-dim)}
+.ci-row span:last-child{color:var(--text);font-family:var(--mono);font-size:11.5px;text-align:right}
+.ci-model{margin-top:10px;font-size:11px;color:var(--text-dim);line-height:1.7}
+
+.tti-legend{display:flex;justify-content:space-between;gap:8px;font-size:9.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.02em;padding-bottom:6px;border-bottom:1px solid var(--border-soft);margin-bottom:4px}
+.tti-row{display:grid;grid-template-columns:70px 1fr 1fr;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-soft);font-size:11.5px;align-items:center}
+.tti-town{font-weight:700;color:var(--text)}
+.tti-flood,.tti-storm{font-family:var(--mono);font-size:11px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.alert-log-entry{padding:8px 0;border-bottom:1px solid var(--border-soft)}
+.alert-log-town{font-size:11px;font-weight:700;color:var(--red);margin-bottom:3px}
+.alert-log-msg{font-size:11.5px;color:var(--text-dim);line-height:1.5}
+
+#nowcastMapDiv{width:100%;height:100%;border-radius:6px;background:var(--bg-2);isolation:isolate}
+.grid-canvas{pointer-events:none}
 
 .station-list{display:flex;flex-direction:column}
 .station-row{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border-soft);cursor:pointer;font-size:12.5px}

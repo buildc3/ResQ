@@ -1,122 +1,72 @@
 # ResQ
 
-A live disaster detection & response monitor — the software core of a three-phase drone-based disaster-response concept, running against a real event: the October 2023 Sikkim glacial lake outburst flood, alongside a hypothetical Himalayan earthquake scenario.
+A live convective-storm nowcasting system — built for **SIH26084** ("Convective-scale nowcasting for Thunderstorms, Hail & Cloudbursts, 0-6hr", Ministry of Earth Sciences). Detects a storm forming *before* it matures, zones the ground for cloudburst/hail/downburst risk, and counts down time-to-impact for real towns — all SIMULATED, running against the real October 2023 Sikkim event.
 
-## Why this exists
+A secondary "Response Module" — the project's original drone Detection → Connectivity → Relief demo — still exists unchanged, kept for reference, outside this problem statement's scope.
 
-- Himalayan disaster corridors lose cell/network coverage exactly when it's needed most — the same flood that causes the emergency takes out the towers.
-- Search-and-rescue loses contact with command at the worst possible moment; relief can't be routed to a zone until someone reports what it needs.
-- The question this project answers: what if the response pipeline reacted at machine speed instead of waiting on a human to notice, decide, and dispatch?
-- Not "build the drones" — that's real hardware, out of scope. This is the **decision logic**: when to trust a sensor reading, in what order to restore connectivity, how relief follows once a zone is reachable.
-- Three phases:
-  - **Detection & Surveillance** — turn raw telemetry into a trustworthy signal, fast and noise-resistant.
-  - **Search & Connectivity** — restore network into the corridor while searching for survivors, in parallel.
-  - **Medical & Relief Delivery** — relief follows the instant a zone is reconnected — a fast drop, then sustained resupply.
+## Why this exists (SIH26084)
+
+- The problem statement asks for a system that fuses radar + satellite + lightning on a common grid and flags a storm **before** it's already a storm — from cloud-top cooling and low-level convergence, ahead of reflectivity/lightning maturity.
+- A concrete gap motivated this: a naive rainfall-threshold detector only fires on the *flood wave*, hours after the real rain peak — too late to be a nowcast. The convective-initiation (CI) detector exists specifically to catch the precursor signals instead.
+- Four hazard outputs per the PS: lightning strike density, hail probability, downburst velocity, cloudburst rainfall threshold — computed per grid cell for the current frame.
+- Real india-relevant grounding: the same October 2023 Sikkim event the project has always modeled, retold from the storm's own genesis instead of its downstream flood consequence.
 
 ```mermaid
 flowchart LR
-    S["Sensor telemetry\n(rainfall, water level, tremor, seismic)"] --> M{{Detection model}}
-    M -->|"Cloudburst / GLOF:\nrolling z-score fusion"| CASE(["Case created"])
-    M -->|"Earthquake:\nSTA/LTA multi-station"| CASE
-
-    CASE --> R["Phase 2\nRelay drones restore network,\nhop by hop outward"]
-    CASE --> SR["Phase 2\nSearch teams sweep\nfor survivors"]
-
-    R --> RC{Zone relay online?}
-    RC -->|yes| MD["Phase 3\nMedical drone:\none precision delivery"]
-    MD --> HP["Phase 3\nHeavy-payload drone:\nrepeat resupply sorties"]
+    S["Simulated radar + satellite + lightning\n(reflectivity, IR cooling, convergence)"] --> CI{{"CI detector:\nrolling z-score per grid cell"}}
+    CI -->|"cluster of cells confirms"| CASE(["Convective-initiation Case\n(before radar/lightning maturity)"])
+    CASE --> HZ["Hazard zoning\n(current frame): cloudburst rain,\nhail proxy, downburst proxy, lightning density"]
+    CASE --> TTI["Time-to-Impact\nfor named towns"]
+    TTI --> ALERT(["In-app alert log\n(SMS-style message, not dispatched)"])
 ```
 
-*Connectivity gates relief — a zone gets nothing from Phase 3 until its own Phase 2 relay is online.*
+*CI detection must fire before the storm's own ground-truth maturity time — the demo proves this with a live "N minutes before maturity" stat, not a claim.*
 
 ## What's real, what's simulated
 
-- **Real**: the disaster event (Sikkim, Oct 2023), the geography (actual Teesta corridor station coordinates), the detection algorithms (rolling z-score fusion; STA/LTA — the real seismology standard), the response logic (relay ordering, connectivity-gates-relief, resupply cadence). All of it runnable code producing internally consistent, physically-sane schedules.
-- **Simulated**: the sensor readings (synthetic, seeded, reproducible) and the drones (no hardware built or claimed — a scheduling concept only). No real satellite feed, telecom infrastructure, or aircraft.
-- The UI never claims otherwise: every number, marker, and status is computed live against real generated schedule data — never scripted, never hardcoded to a moment.
+| | Real | Simulated / proxy |
+|---|---|---|
+| Event | Oct 2023 Sikkim storm/flood, geography (real Teesta corridor + town coordinates) | Radar reflectivity, satellite IR, lightning flashes — no real feed |
+| Detection method | Rolling z-score → sigmoid → sustained-trigger (real statistical pattern, same one used for the response module's cloudburst/earthquake models) | — |
+| Cloudburst rain rate | Z-R relation (Marshall-Palmer, Z=200·R^1.6 — **not re-verified against a primary source this session, TO BE VERIFIED**) applied to simulated reflectivity | Threshold (≥100mm/hr) — **also TO BE VERIFIED against a primary IMD source** |
+| Hail probability, downburst velocity | — | Explicit **PROXY** heuristics (no public labelled hail/downburst dataset for India exists to calibrate against — stated plainly in-app) |
+| Lightning strike density | Direct count of simulated flashes (not a proxy) | The flashes themselves are simulated |
+| Downstream GLOF flood TTI | Real formula (basin_km ÷ flood-wave speed), reused unchanged from the Response Module | — |
+| Storm-cell TTI | — | Computed from this simulated event's own known track/steering vector — not a general forecast, labeled as such in the UI |
+| Forecast lead time (T+10min…T+6h) | Grid + time-axis structure exists | **No forecast engine yet** — the lead-time slider shows an honest "not implemented" placeholder past T+0, never fabricated numbers |
+| Real data-source adapters (INSAT, IMD DWR, lightning network) | Documented interface + schema (`web/pipeline/sources/`) | Stubs only — not wired to any live feed; access terms marked TO BE VERIFIED |
 
 ## How it's built
 
-- 100% TypeScript/JavaScript, one Netlify-deployable package.
-- No Python, no backend service, no database — a Node pipeline generates everything at build time; a static frontend plays it back.
+- 100% TypeScript/JavaScript, one Netlify-deployable package. No Python, no backend, no database.
+- Convective nowcast and Response Module share one build-time pipeline and one 720-frame, 10-minute-resolution timeline — the storm is generated on the identical time grid as the flood/earthquake scenarios, so one playhead drives all three.
 
 ```
 web/                Netlify-deployable npm project (netlify.toml's build base)
-  pipeline/            TypeScript: synthetic sensor generation + detection models
+  pipeline/            TypeScript: sensor + storm generation, detection models, hazards, TTI
+    sources/             documented real-data-adapter interface — stubs only, not wired
   data/                pipeline output (JSON) — regenerated fresh every build
   index.html/css/js    the frontend: vanilla HTML/CSS/JS + Leaflet, no framework
-  qa/                  headless-browser QA (Playwright) — 60 automated checks
+  qa/                  headless-browser QA (Playwright) — 71 automated checks
   README.md            architecture deep-dive: algorithms, data schema, UI wiring
 
 netlify.toml         build = "npm run build" (base: web) — Node only
 ```
 
-```mermaid
-flowchart LR
-    NETLIFY(["npm run build"]) --> PIPE
+### Convective initiation (CI) detection
 
-    subgraph BT["Build time — Node"]
-        direction LR
-        PIPE["pipeline/*.ts"] --> GEN["Generate synthetic\nsensor data"]
-        GEN --> DET["Run detection models\nz-score fusion / STA-LTA"]
-        DET --> SCH["Generate Phase 2 + 3\nschedules"]
-        SCH --> DATA[("JSON\nweb/data/")]
-    end
-
-    subgraph RT["Runtime — static frontend"]
-        direction LR
-        UI["index.html / app.js\n+ Leaflet"] --> LOOP{{"Render loop:\nplayhead vs. real timestamps"}}
-    end
-
-    DATA --> UI
-```
-
-*"Live" means the UI re-derives its own state every frame from real timestamps — not a network connection. The frontend is static files reading pre-generated JSON.*
-
-### Detection
-
-- Two scenarios run in parallel over an identical 5-day, 10-minute-resolution timeline.
-- **Cloudburst — rolling z-score fusion**: each station compares live rainfall/water-level/tremor against its own baseline, scores the anomaly via sigmoid, combines all three signals. Triggers once multiple corridor stations sustain a high score for several readings — resistant to a single spike.
-- **Earthquake — STA/LTA multi-station**: the real seismology-standard algorithm — short-term motion average vs. long-term baseline, a sudden ratio spike signals an event. Confirmed only once multiple stations trigger within a matching window.
-- Once triggered, a **Case** is created with full Phase 2/3 schedules already generated: relay order, search-sweep timing and survivor counts, medical dispatch timing, resupply sortie count — all real data in JSON before the UI ever renders a frame.
+- A ~1.5km grid over the same real geography the Response Module already uses.
+- A single seeded storm scenario re-tells Oct 3-4, 2023 as a convective cloudburst over the upper Teesta — cloud-top cooling and low-level convergence begin ~2-3 hours before the storm's own reflectivity/lightning maturity.
+- Per grid cell: rolling z-score of cooling rate + convergence, an **adaptive per-cell threshold** calibrated from that cell's own quiet-period noise (the same calibration idea already proven in the Response Module's cloudburst/earthquake models), sigmoid → probability.
+- A small cluster of neighboring cells (≥3) must confirm together — the spatial equivalent of "multiple stations must agree."
+- On confirmation: a Case is created, with a live "detected N minutes before maturity" stat computed against the storm's own ground-truth maturity timestamp.
 
 ### Frontend
 
-- One rule everything is built around: every live number comes from comparing the current timeline position to real timestamps, recomputed every frame — never hardcoded, never scripted to a cue.
-- Understandable with zero prior context: first-run intro modal + guided auto-playback, plain-language explainers next to every phase, a live "what's been achieved so far" impact strip.
-- Accessible: colorblind-safe shape redundancy on every status indicator, full keyboard operability, `prefers-reduced-motion` support.
-
-### How one case unfolds
-
-```mermaid
-sequenceDiagram
-    participant Sensors
-    participant Detector
-    participant Case
-    participant Relay as Relay drones
-    participant Search as Search teams
-    participant Medical as Medical drone
-    participant Heavy as Heavy-payload drone
-
-    Sensors->>Detector: readings, every 10 simulated minutes
-    Detector->>Detector: rolling z-score fusion / STA-LTA
-    Detector->>Case: threshold sustained → case created
-    Case->>Relay: deploy schedule (outward from network edge)
-    Case->>Search: sweep schedule, per zone
-    par restoring connectivity
-        Relay-->>Case: zone relay online
-    and searching in parallel
-        Search-->>Case: survivor found
-    end
-    Case->>Medical: dispatch precision delivery (zone reconnected)
-    Medical-->>Case: delivered
-    loop every ~20-30h while the response continues
-        Case->>Heavy: dispatch resupply sortie
-        Heavy-->>Case: sortie delivered
-    end
-```
-
-*Every arrow is a real timestamp already sitting in the case's generated schedule — the frontend just notices, each tick, which have happened yet.*
+- Nowcast is the default view: a grid canvas layer (toggle between reflectivity, convergence, cloud-top cooling, CI probability, and current-frame hazard zoning), a Convective Initiation status panel, a Time-to-Impact panel per named town, and an in-app alert log.
+- The lead-time slider (T+0…T+6h) is honest about what doesn't exist yet — past T+0 it shows a "forecast engine not yet implemented" note, never invented numbers.
+- Response Module (station map, cloudburst/earthquake cases, drone Phase 1-3) is one nav tab away, fully intact, clearly labeled legacy.
+- Accessible: colorblind-safe shape redundancy, full keyboard operability, `prefers-reduced-motion` support — carried over to every new control.
 
 ## Getting started
 
@@ -124,7 +74,7 @@ sequenceDiagram
 cd web
 npm install
 npm run dev   # generates data + runs detection, serves on http://localhost:8000
-npm run qa    # headless-browser QA pass (60 checks)
+npm run qa    # headless-browser QA pass (71 checks)
 ```
 
 - Deploy: push to a git remote, connect the repo in Netlify — `netlify.toml` handles the rest, no manual env vars needed.
@@ -132,5 +82,11 @@ npm run qa    # headless-browser QA pass (60 checks)
 
 ## Scope
 
-- All three phases complete and fully simulated end to end — none of it mock or static.
-- `data-pipeline/` (an earlier Python prototype) remains untouched but unused; the deployed project is 100% TypeScript/Node.
+**Built (Milestone 1):** grid + time-axis structure, the simulated storm scenario, CI detection with a live before-maturity proof, current-frame hazard zoning (cloudburst/hail-proxy/downburst-proxy/lightning-density), downstream GLOF flood TTI (real) + storm-cell TTI (from simulated ground truth) + in-app alert log, and the full original Response Module (drone Detection → Connectivity → Relief), unchanged.
+
+**Deferred to a future milestone (documented, not built):**
+- General vision-based multi-frame cell tracking and a real 0-6h forecast engine that projects hazard fields forward with decaying skill (the lead-time slider's placeholder exists for this).
+- A verification panel (POD/FAR/CSI skill metrics vs. lead time).
+- Any ConvLSTM/U-Net model.
+- Live SMS dispatch (Twilio or otherwise) — the alert log is in-app only.
+- Real INSAT/IMD-DWR/lightning-network data ingestion — `web/pipeline/sources/` documents the interface but every loader is a stub.

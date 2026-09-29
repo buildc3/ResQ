@@ -14,6 +14,12 @@ import { buildCloudburstCase, buildEarthquakeCase } from './cases.js';
 import { buildCloudburstStationDamage, buildEarthquakeStationDamage, type StationDamageFrame } from './damage.js';
 import { buildPhase2Plan, type RelayDeployment } from './phase2.js';
 import { buildPhase3Plan } from './phase3.js';
+import { GRID_CELLS, GRID_ROWS, GRID_COLS, GRID_LAT_MIN, GRID_LAT_MAX, GRID_LON_MIN, GRID_LON_MAX, LEAD_TIME_MINUTES } from './grid.js';
+import { runConvection } from './convection.js';
+import { runCIDetection } from './ciDetection.js';
+import { buildHazardFrames, HAZARD_PARAMS } from './hazards.js';
+import { buildFloodTTI, buildStormTTI } from './tti.js';
+import { buildConvectiveCase } from './cases.js';
 
 function relayDeployMap(relays: RelayDeployment[]): Record<string, string> {
   return Object.fromEntries(relays.map((r) => [r.station_id, r.deploy_at]));
@@ -104,6 +110,48 @@ function main() {
   const cases = [cbCase, eqCase].filter(Boolean);
   writeJson('cases.json', cases);
   console.log(`wrote ${cases.length} case(s)`);
+
+  console.log('Generating SIMULATED convective nowcast scenario (SIH26084)...');
+  writeJson('grid.json', {
+    rows: GRID_ROWS,
+    cols: GRID_COLS,
+    bounds: { lat_min: GRID_LAT_MIN, lat_max: GRID_LAT_MAX, lon_min: GRID_LON_MIN, lon_max: GRID_LON_MAX },
+    cells: GRID_CELLS,
+    lead_time_minutes: LEAD_TIME_MINUTES,
+  });
+
+  const conv = runConvection();
+  writeJson('convection_frames.json', conv.frames);
+  writeJson('convection_lightning.json', conv.lightning);
+  writeJson('convection_ground_truth.json', conv.groundTruth);
+  console.log(`  storm initiation=${conv.groundTruth.initiation_at} maturity=${conv.groundTruth.maturity_at}`);
+
+  const ci = runCIDetection(conv.cellSeries, conv.timesMs, conv.groundTruth);
+  // Sparse export: only frames/cells with a non-trivial probability, same
+  // "omit the clear/uninteresting majority" approach as convection_frames.json.
+  const CI_EXPORT_THRESHOLD = 0.05;
+  const ciFrames = conv.frames.map((frame, i) => {
+    const cells = GRID_CELLS
+      .map((c) => ({ cell_id: c.id, probability: ci.probabilityByCell[c.id][i] }))
+      .filter((c) => c.probability >= CI_EXPORT_THRESHOLD)
+      .map((c) => ({ cell_id: c.cell_id, probability: Math.round(c.probability * 1000) / 1000 }));
+    return { timestamp: frame.timestamp, cells };
+  }).filter((f) => f.cells.length > 0);
+  writeJson('ci_probability_frames.json', ciFrames);
+  console.log(`  CI triggered=${ci.result.triggered} detectedAt=${ci.result.detectedAt ?? '—'} leadMinutesBeforeMaturity=${ci.result.leadMinutesBeforeMaturity ?? '—'}`);
+
+  const ciCase = buildConvectiveCase(ci.result, conv.groundTruth);
+  writeJson('ci_case.json', ciCase);
+
+  const hazardFrames = buildHazardFrames(conv.frames, conv.lightning);
+  writeJson('hazard_frames.json', hazardFrames);
+  writeJson('hazard_params.json', HAZARD_PARAMS);
+
+  writeJson('tti_flood.json', buildFloodTTI());
+  const stormTTI = buildStormTTI(conv.groundTruth);
+  writeJson('tti_storm.json', stormTTI.tti);
+  writeJson('alert_log.json', stormTTI.alerts);
+  console.log(`  wrote ${stormTTI.alerts.length} alert log entrie(s)`);
 }
 
 main();

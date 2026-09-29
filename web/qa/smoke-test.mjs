@@ -44,13 +44,21 @@ async function desktopPass() {
   await page.screenshot({ path: shot('00-intro-modal') });
   await page.locator('#introExplore').click();
   check('intro modal dismissed after Explore freely', await page.locator('#introModal').isHidden());
-  await page.screenshot({ path: shot('01-monitor-initial') });
+  check('Nowcast is the default view on load', await page.locator('#view-nowcast').evaluate(el => el.classList.contains('active')));
+  await page.screenshot({ path: shot('01-nowcast-initial') });
+
+  // The legacy Response Module (station map, cloudburst/earthquake cases,
+  // drone Phase 1-3) is no longer the default view — switch into it before
+  // exercising any of its own checks below.
+  await page.locator('.nav-tab[data-view="monitor"]').click();
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: shot('01b-response-module-initial') });
 
   check('2 gauges rendered', await page.locator('.gauge-card').count() === 2);
   check('7 station rows rendered', await page.locator('.station-row').count() === 7);
-  check('map legend visible', await page.locator('.legend').first().isVisible());
-  check('map legend calls out relay/relief drones explicitly', (await page.locator('.legend').first().innerText()).toLowerCase().includes('relay drone online'));
-  check('damage heat map legend visible', await page.locator('.damage-legend').isVisible());
+  check('map legend visible', await page.locator('#view-monitor .legend').first().isVisible());
+  check('map legend calls out relay/relief drones explicitly', (await page.locator('#view-monitor .legend').first().innerText()).toLowerCase().includes('relay drone online'));
+  check('damage heat map legend visible', await page.locator('#view-monitor .damage-legend').isVisible());
   check('damage heat map canvas rendered', await page.locator('#mapDiv canvas').count() > 0);
 
   // Speed controls: typing either field keeps the other in sync, and setting
@@ -356,10 +364,72 @@ async function errorStatePass() {
   await page.close();
 }
 
+async function nowcastPass() {
+  // Isolated page: exercises the SIH26084 Nowcast view (the new default) —
+  // layer toggles, the lead-time slider's honest "forecast not implemented"
+  // placeholder, CI case detection, TTI countdown, and the alert log — all
+  // SIMULATED, per the README's "what's real, what's simulated" table.
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const pageErrors = [];
+  page.on('pageerror', (e) => pageErrors.push(e.stack || e.message));
+  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(500);
+  await page.locator('#introExplore').click();
+  await page.waitForTimeout(300);
+
+  check('Response Module nav tab is labeled legacy', (await page.locator('.nav-tab[data-view="monitor"]').innerText()).toLowerCase().includes('legacy'));
+  check('nowcast map renders', await page.locator('#nowcastMapDiv canvas').count() > 0);
+  check('layer toggle panel offers reflectivity/convergence/cooling/CI/hazard layers', await page.locator('input[name="nowcastLayer"]').count() === 5);
+
+  // Lead-time slider: T+0 shows no placeholder; anything past it must show
+  // the honest "not implemented yet" note rather than invented numbers.
+  const leadSlider = page.locator('#leadTimeSlider');
+  check('lead-time slider starts at T+0 with no forecast-pending note', await page.locator('#forecastPendingNote').isHidden());
+  await leadSlider.fill('6');
+  await leadSlider.dispatchEvent('input');
+  await page.waitForTimeout(100);
+  check('lead-time slider past T+0 shows the forecast-not-implemented placeholder, not fabricated data', await page.locator('#forecastPendingNote').isVisible());
+  await leadSlider.fill('0');
+  await leadSlider.dispatchEvent('input');
+
+  // Scrub to the storm's active window and confirm CI detection, TTI, and
+  // the alert log all populate from real generated schedule data.
+  const track = page.locator('#scrubTrack');
+  const box = await track.boundingBox();
+  await page.mouse.click(box.x + box.width * 0.352, box.y + box.height / 2); // ~Oct 3, 18:10 — just past CI detection
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: shot('11-nowcast-ci-detected') });
+  const ciText = (await page.locator('#ciStatusPanel').innerText()).toLowerCase();
+  const ciLeadStatText = await page.locator('.ci-lead-stat').innerText().catch(() => '');
+  const ciLeadMinutes = parseInt(ciLeadStatText, 10);
+  check('CI status panel shows a positive lead-time-before-maturity once confirmed', ciText.includes('min before maturity') && Number.isFinite(ciLeadMinutes) && ciLeadMinutes > 0);
+  check('CI status panel explains the model in plain language via tooltip chips', await page.locator('#ciStatusPanel .info-chip').count() > 0);
+
+  check('TTI panel shows all 7 towns', await page.locator('.tti-row').count() === 7);
+  check('TTI panel distinguishes real downstream flood TTI from simulated storm-track TTI', (await page.locator('.tti-legend').innerText()).toLowerCase().includes('simulated'));
+
+  await page.mouse.click(box.x + box.width * 0.378, box.y + box.height / 2); // past the first alert's issued_at
+  await page.waitForTimeout(300);
+  check('alert log shows at least one CRITICAL ALERT entry once a storm TTI trigger fires', (await page.locator('#alertLogPanel').innerText()).includes('CRITICAL ALERT'));
+
+  // Hazard layer: at the storm's mature/peak frame, at least one grid cell
+  // should have crossed a hazard threshold (checked at the pipeline level
+  // too — see build.ts's own "CI triggered" log — but this confirms it
+  // actually reaches the rendered layer toggle state, not just the data).
+  await page.locator('input[name="nowcastLayer"][value="hazard"]').click();
+  await page.waitForTimeout(200);
+  check('hazard layer selectable without throwing', await page.locator('input[name="nowcastLayer"][value="hazard"]').isChecked());
+
+  check('no page errors on the nowcast view', pageErrors.length === 0);
+  if (pageErrors.length) pageErrors.forEach((m) => console.log('  ' + m));
+  await page.close();
+}
+
 await desktopPass();
 await mobilePass();
 await speedControlPass();
 await storyModePass();
+await nowcastPass();
 await errorStatePass();
 await browser.close();
 

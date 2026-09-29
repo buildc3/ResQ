@@ -9,6 +9,8 @@ import type { DetectionResultCloudburst } from './cloudburst.js';
 import type { DetectionResultEarthquake } from './earthquake.js';
 import type { Phase2Plan } from './phase2.js';
 import type { Phase3Plan } from './phase3.js';
+import type { CIDetectionResult } from './ciDetection.js';
+import type { ConvectionGroundTruth } from './convection.js';
 
 function severityLabel(probability: number): 'critical' | 'high' | 'moderate' {
   if (probability >= 0.95) return 'critical';
@@ -64,6 +66,45 @@ export function buildCloudburstCase(result: DetectionResultCloudburst, phase2: P
     phase_3: {
       medical_deliveries: phase3.medical_deliveries,
       relief_sorties: phase3.relief_sorties,
+    },
+  };
+}
+
+/**
+ * The SIH26084 primary case type — convective initiation, detected per
+ * grid-cell cluster rather than per station. Deliberately a different,
+ * smaller shape than the legacy cloudburst/earthquake cases: there's no
+ * Phase 2/3 drone response here (that's Response Module-only, out of
+ * SIH26084 scope) — just the detection itself plus the "before maturity"
+ * proof the problem statement requires.
+ */
+export function buildConvectiveCase(result: CIDetectionResult, groundTruth: ConvectionGroundTruth) {
+  if (!result.triggered) return null;
+  const leadNote = result.leadMinutesBeforeMaturity !== undefined && result.leadMinutesBeforeMaturity > 0
+    ? `${result.leadMinutesBeforeMaturity} minutes before the storm reached maturity`
+    : 'at or after the storm already reached maturity — see README known-issues if this ever shows a non-positive lead time';
+
+  return {
+    case_id: 'CASE-CONVECTIVE-20231003',
+    disaster_type: 'convective_ci',
+    title: 'Convective Initiation — Upper Teesta Catchment',
+    location: {
+      region_label: 'Upper Teesta catchment, North Sikkim (SIMULATED storm cell)',
+    },
+    detected_at: result.detectedAt,
+    maturity_at: groundTruth.maturity_at,
+    first_lightning_at: groundTruth.first_lightning_at,
+    lead_minutes_before_maturity: result.leadMinutesBeforeMaturity,
+    confirmed_cells: result.confirmedCells,
+    steering_vector: groundTruth.steering_vector,
+    phase_1: {
+      status: 'complete',
+      model: 'ci_zscore_grid_fusion',
+      model_params: result.params,
+      summary:
+        `Rolling z-score fusion on cloud-top cooling + low-level convergence confirmed a convective-initiation ` +
+        `cluster (${(result.confirmedCells || []).length} grid cells) at ${result.detectedAt} — ${leadNote}. ` +
+        `Peak probability ${result.peakProbability.toFixed(2)} at ${result.peakProbabilityAt}.`,
     },
   };
 }

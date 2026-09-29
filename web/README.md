@@ -1,6 +1,6 @@
 # ResQ — Architecture Reference
 
-This is the technical deep-dive: exact pipeline responsibilities, the data schema, and precisely how the UI is wired to real data. For what the project is and why it exists, see the [root README](../README.md) first.
+This is the technical deep-dive: exact pipeline responsibilities, the data schema, and precisely how the UI is wired to real data — for both the SIH26084 convective nowcast (primary) and the legacy Response Module (secondary). For what the project is and why it exists, see the [root README](../README.md) first.
 
 A single Netlify-deployable npm project: vanilla HTML/CSS/JS frontend, and a **TypeScript data pipeline that generates the synthetic sensor data and runs the detection models at build time** — no Python, no external service, no committed multi-megabyte dataset to keep in sync. `npm run build` is the entire deploy; Netlify needs nothing but Node.
 
@@ -8,7 +8,7 @@ A single Netlify-deployable npm project: vanilla HTML/CSS/JS frontend, and a **T
 
 ```
 web/
-  index.html, css/app.css, js/app.js   the UI (unchanged vanilla frontend)
+  index.html, css/app.css, js/app.js   the UI — vanilla HTML/CSS/JS, no framework
   pipeline/           TypeScript data generation + detection (see below)
   data/               output of `npm run generate-data` — committed to git as a fallback, but regenerated fresh on every build
   qa/smoke-test.mjs   headless-browser QA pass (Playwright)
@@ -30,7 +30,14 @@ web/
 | `phase2.ts` | Phase 2 (Search & Connectivity) — generates the relay-deployment and search-sweep schedules embedded in each case |
 | `phase3.ts` | Phase 3 (Medical & Relief Delivery) — generates the medical-delivery and repeat heavy-payload-sortie schedules |
 | `cases.ts` | Turns a triggered detection into a Case object (the schema the UI reads) |
-| `build.ts` | Orchestrator — runs both scenarios, writes the 10 JSON files straight into `data/` |
+| `grid.ts` | SIH26084: the common lat/lon grid (~1.5km cells) over the same real geography, derived from `stations.ts`'s bounds; also the fixed T+0…T+6h lead-time axis |
+| `convection.ts` | SIH26084: SIMULATED single storm scenario — reflectivity, convergence, IR brightness temp, lightning flashes, and ground-truth metadata (initiation/maturity/track), generated on the identical 720-frame timeline as `cloudburst.ts`/`earthquake.ts` |
+| `ciFeatures.ts` | SIH26084: feature computation (cloud-top cooling rate) for the CI detector, kept separate from detection logic — same split as `damage.ts` is from `cloudburst.ts` |
+| `ciDetection.ts` | SIH26084: convective-initiation detection — rolling z-score → adaptive per-cell threshold → sigmoid → spatial-cluster confirmation, reusing `mathUtils.ts`'s exact functions and `cloudburst.ts`'s calibration pattern |
+| `hazards.ts` | SIH26084: current-frame hazard zoning — cloudburst rain rate (Z-R relation), hail/downburst PROXY heuristics, lightning density, Red/Yellow/nominal zoning |
+| `tti.ts` | SIH26084: Time-to-Impact — downstream GLOF flood TTI (real, reused from `cloudburst.ts`'s own formula) + storm-cell TTI (from the simulated event's ground truth) + in-app alert log entries |
+| `sources/` | SIH26084: documented real-data-adapter interface (INSAT IR, IMD DWR, lightning network) — **stubs only**, not wired to any live feed; see file-level comments for access-terms verification status |
+| `build.ts` | Orchestrator — runs both legacy scenarios plus the convective nowcast scenario, writes all JSON straight into `data/` |
 
 Run it directly:
 ```
@@ -60,7 +67,18 @@ The repo root has a `netlify.toml`:
 ```
 Connect the repo in Netlify — `npm install && npm run build` runs entirely on Node (no Python, no other language runtime, no external data source). Push to the connected branch to redeploy; the data regenerates fresh every time from the pipeline source, deterministically (same seeds → same output).
 
-## How the UI is wired to real data
+## SIH26084 convective nowcast — how the UI is wired
+
+- **Shared timeline**: `convection_frames.json` is generated on the exact same 720-frame, 10-minute grid as `cloudburst_frames.json`/`earthquake_frames.json` — `FRAME_ISO[state.frameIndex]` drives the Nowcast view with zero extra bookkeeping.
+- **Sparse export**: the storm is only ever active for a fraction of the 5-day window, so `convection_frames.json`, `ci_probability_frames.json`, and `hazard_frames.json` only include an entry for timestamps with at least one non-nominal cell — a missing entry means "clear," and the frontend (`computeGridLayerValues` in `app.js`) treats it exactly that way, never as a loading gap.
+- **Grid canvas**: `createGridCanvas()` in `app.js` — the same offscreen-canvas-plus-`redraw()` idiom as the existing `createHeatCanvas`, adapted to draw filled cell rectangles (from `grid.json`'s row/col layout) instead of radial-gradient points, colorized through a small ramp per layer (reflectivity/convergence/cooling/CI-probability each get their own color scale; the hazard layer is a flat red/yellow fill instead of a continuous ramp).
+- **CI case reveal**: same reveal-the-instant-the-real-timestamp-passes pattern as the legacy cases, just against `ci_case.json`'s `detected_at` instead of `CASES`. The Convective Initiation panel shows the live `lead_minutes_before_maturity` stat and the model's calibrated parameters (with plain-language tooltips, same `MODEL_TOOLTIPS`/`tooltipChip` mechanism).
+- **Time-to-Impact panel**: one row per real town, two independently-computed countdowns — downstream GLOF flood arrival (`tti_flood.json`, real basin_km + wave-speed formula) and storm-cell arrival (`tti_storm.json`, from the simulated event's own known track) — deliberately never merged into one number, since they come from different kinds of evidence.
+- **Alert log**: `alert_log.json` entries reveal in-app the instant their `issued_at` timestamp passes, using the SIH26084 brief's exact SMS template text. Nothing is actually dispatched — there is no Twilio call, no backend, no phone number on file.
+- **Lead-time slider honesty**: `#leadTimeSlider` (0-36, ×10min) is real UI, but only T+0 has real data behind it. Moving past T+0 shows `#forecastPendingNote` ("Forecast engine not yet implemented") instead of any computed value — enforced in `initNowcastUI()` in `app.js`, not just a documentation promise.
+- **Response Module coexistence**: `switchView()` now also toggles the shared `#transportBar` (visible for Nowcast + Response Module, hidden for Cases/Case Detail) and calls `invalidateSize()` on whichever Leaflet map instance (`nowcastMap` or `leafMap`) just became visible — both maps are built eagerly at `init()` time, and Leaflet reports a 0×0 container for any map whose view was `display:none` at creation, so this call is load-bearing, not optional.
+
+## How the Response Module UI is wired to real data
 
 - **Timeline**: both `cloudburst_frames.json` and `earthquake_frames.json` share an identical 720-entry, 10-minute grid spanning 2023-10-02 00:00 → 2023-10-06 23:50 — the UI scrubber/playhead is just an index (0-719) into that shared grid.
 - **Playback speed**: a slider (log scale, 0.05×-2000×) plus two synced number inputs — type a speed multiplier directly, or type a target "finish in N seconds" and the app back-solves the multiplier (`speed = (TOTAL_FRAMES-1)/(6*seconds)`, since 6 frames/sec is the fps at 1×). Whichever field you touch last wins; the other one and the slider update to match.
@@ -87,7 +105,7 @@ Timestamps are treated as plain fixed-width ISO strings throughout (never parsed
 ```
 npm run qa
 ```
-Runs a headless-Chromium (Playwright) pass against the real served app — 60 checks covering data load, every phase's live-update behavior, the speed control's actual timing, accessibility (keyboard operability, colorblind-safe indicators), the onboarding/story mode, and error states. See inline comments in `qa/smoke-test.mjs` for exactly what's checked. Screenshots land in `qa/shots/` (gitignored).
+Runs a headless-Chromium (Playwright) pass against the real served app — 71 checks covering data load, every phase's live-update behavior, the speed control's actual timing, accessibility (keyboard operability, colorblind-safe indicators), the onboarding/story mode, error states, and the SIH26084 Nowcast view (layer toggles, the lead-time slider's honest placeholder, CI detection, TTI, alert log — plus a regression check that the Response Module is still fully reachable and unmodified). See inline comments in `qa/smoke-test.mjs` for exactly what's checked. Screenshots land in `qa/shots/` (gitignored).
 
 ## What happened to the Python pipeline?
 

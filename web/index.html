@@ -30,10 +30,10 @@
 </div>
 <div id="introModal" class="modal-overlay" hidden>
   <div class="modal-card">
-    <div class="modal-brand"><span class="brand-mark"></span>SENTINEL&nbsp;HIMALAYAS</div>
-    <h1>A live disaster detection &amp; response monitor</h1>
-    <p>This simulates a real cloudburst/GLOF event from Sikkim (October 2023) alongside a hypothetical earthquake — both playing out on the same 5-day timeline. Sensor readings feed real statistical detection models that decide, on their own, when a disaster is happening. Once detected, a <strong>Case</strong> opens and tracks three response phases: <strong>Detection</strong>, <strong>Search &amp; Connectivity</strong>, and <strong>Relief Delivery</strong> — all driven by real generated schedules, not scripted animation.</p>
-    <p class="modal-sub">Everything you see — probabilities, relay deployments, survivor counts, delivery weights — is computed from the underlying data, not staged.</p>
+    <div class="modal-brand"><span class="brand-mark"></span>RESQ — CONVECTIVE NOWCAST</div>
+    <h1>Detecting a storm before it matures</h1>
+    <p>This SIMULATES a convective cloudburst forming over the upper Teesta catchment on 2023-10-03/04 — the same real Sikkim event ResQ has always modeled, retold from the storm's own genesis instead of its flood consequence. A grid-based detector watches for cloud-top cooling and low-level convergence (the physical precursors to a storm) and must prove it can flag the cell <strong>before</strong> radar/lightning maturity — not after. Nothing here is real radar, satellite, or lightning data; see the README's "What's real, what's simulated" table before treating any layer as an observation.</p>
+    <p class="modal-sub">The original drone Detection → Connectivity → Relief response demo still exists, unchanged, under "Response Module" — kept for reference, outside this problem statement's scope.</p>
     <div class="modal-actions">
       <button class="modal-btn-primary" id="introPlayStory">▶ Play the Story (~50s)</button>
       <button class="modal-btn-secondary" id="introExplore">Explore freely</button>
@@ -63,9 +63,10 @@
 
 <div id="app">
   <header class="topbar">
-    <div class="brand"><span class="brand-mark"></span><span class="brand-label">SENTINEL&nbsp;HIMALAYAS</span></div>
+    <div class="brand"><span class="brand-mark"></span><span class="brand-label">ResQ</span></div>
     <nav class="nav-tabs">
-      <div class="nav-tab active" data-view="monitor">Monitor</div>
+      <div class="nav-tab active" data-view="nowcast">Nowcast</div>
+      <div class="nav-tab" data-view="monitor">Response Module<span class="legacy-badge">legacy</span></div>
       <div class="nav-tab" data-view="cases">Cases<span class="badge-count" id="casesBadge" style="display:none">0</span></div>
     </nav>
     <div class="topbar-right">
@@ -84,9 +85,58 @@
 
   <div id="toasts"></div>
 
-  <!-- MONITOR VIEW -->
-  <section class="view active" id="view-monitor">
+  <!-- NOWCAST VIEW (SIH26084 primary) -->
+  <section class="view active" id="view-nowcast">
+    <div class="nowcast-body">
+      <div class="panel map-panel">
+        <div class="panel-head">Upper Teesta Catchment — Convective Nowcast <span class="sim-badge">SIMULATED</span></div>
+        <div class="map-wrap">
+          <div id="nowcastMapDiv"></div>
+          <div class="legend nowcast-zone-legend">
+            <div class="legend-row"><span class="legend-dot" style="background:transparent;border:2px solid #c9302c"></span>Red — threshold exceeded</div>
+            <div class="legend-row"><span class="legend-dot" style="background:transparent;border:2px solid #b8790b"></span>Yellow — elevated</div>
+            <div class="legend-row"><span class="legend-dot" style="background:#7a4fae"></span>Lightning flash</div>
+            <div class="legend-row"><span class="legend-dot" style="background:#2b7fb0"></span>Town / asset</div>
+          </div>
+        </div>
+        <div class="layer-toggle-panel" id="layerTogglePanel">
+          <div class="layer-toggle-group">
+            <div class="layer-toggle-group-label">Observed</div>
+            <label class="layer-toggle"><input type="radio" name="nowcastLayer" value="reflectivity" checked>Reflectivity (dBZ)</label>
+            <label class="layer-toggle"><input type="radio" name="nowcastLayer" value="convergence">Convergence</label>
+            <label class="layer-toggle"><input type="radio" name="nowcastLayer" value="ir">Cloud-top cooling</label>
+            <label class="layer-toggle"><input type="radio" name="nowcastLayer" value="ci">CI probability</label>
+          </div>
+          <div class="layer-toggle-group">
+            <div class="layer-toggle-group-label">Hazard zones <span class="sim-badge sim-badge-sm">current frame only</span></div>
+            <label class="layer-toggle"><input type="radio" name="nowcastLayer" value="hazard">Cloudburst / hail / downburst</label>
+          </div>
+          <label class="layer-toggle-off"><input type="checkbox" id="nowcastLayerOff">Hide grid layer</label>
+        </div>
+      </div>
+
+      <div class="panel side-panel nowcast-side-panel">
+        <div class="panel-head">Convective Initiation</div>
+        <div id="ciStatusPanel" class="ci-status-panel"></div>
+        <div class="panel-head">Time to Impact</div>
+        <div id="ttiPanel" class="tti-panel"></div>
+        <div class="panel-head">Alert Log</div>
+        <div id="alertLogPanel" class="alert-log-panel"></div>
+      </div>
+    </div>
+
+    <div class="lead-time-bar">
+      <span class="lead-time-label">Lead time</span>
+      <input type="range" id="leadTimeSlider" min="0" max="36" value="0" step="1">
+      <span class="lead-time-value" id="leadTimeValue">T+0 (live)</span>
+      <span class="forecast-pending" id="forecastPendingNote" hidden>Forecast engine not yet implemented (planned: WP5) — showing observed state only.</span>
+    </div>
+  </section>
+
+  <!-- MONITOR VIEW (Response Module — legacy, outside SIH26084 scope) -->
+  <section class="view" id="view-monitor">
     <div class="monitor-body">
+      <div class="legacy-banner">Response Module — the original drone Detection → Connectivity → Relief demo. Kept for reference; outside SIH26084 scope.</div>
       <div class="panel map-panel">
         <div class="panel-head">Sikkim — Sensor Network</div>
         <div class="map-wrap">
@@ -114,24 +164,6 @@
       </div>
 
       <div class="panel prob-panel" id="probPanel"></div>
-    </div>
-
-    <div class="transport">
-      <button class="play" id="playBtn" aria-label="Play or pause the timeline">▶</button>
-      <div class="speed-select" id="speedSelect">
-        <input type="range" id="speedSlider" min="0" max="100" value="25" step="0.1" title="Drag to adjust playback speed">
-        <label class="speed-field">speed <input type="number" id="speedInput" value="1" min="0.05" step="any">×</label>
-        <label class="speed-field">finish in <input type="number" id="durationInput" min="0.1" step="any">s</label>
-      </div>
-      <div class="scrub-wrap">
-        <div class="scrub-track" id="scrubTrack">
-          <div class="scrub-fill" id="scrubFill"></div>
-          <div id="scrubMarkers"></div>
-          <div class="scrub-playhead" id="scrubPlayhead"></div>
-        </div>
-      </div>
-      <div class="time-range">Oct 2 00:00 → Oct 6 23:59</div>
-      <div class="time-label" id="timeLabel">Oct 2, 00:00</div>
     </div>
   </section>
 
@@ -169,6 +201,30 @@
       <div class="tab-content" id="tab-p3"></div>
     </div>
   </section>
+
+  <!-- TRANSPORT BAR — shared across Nowcast + Response Module, since both
+       play back the same underlying 720-frame timeline (see app.js: the
+       convective scenario is generated on the identical 10-min grid as the
+       cloudburst/earthquake scenarios, so one playhead index drives all
+       three). Hidden on Cases/Case Detail, which have no timeline of their
+       own. -->
+  <div class="transport" id="transportBar">
+    <button class="play" id="playBtn" aria-label="Play or pause the timeline">▶</button>
+    <div class="speed-select" id="speedSelect">
+      <input type="range" id="speedSlider" min="0" max="100" value="25" step="0.1" title="Drag to adjust playback speed">
+      <label class="speed-field">speed <input type="number" id="speedInput" value="1" min="0.05" step="any">×</label>
+      <label class="speed-field">finish in <input type="number" id="durationInput" min="0.1" step="any">s</label>
+    </div>
+    <div class="scrub-wrap">
+      <div class="scrub-track" id="scrubTrack">
+        <div class="scrub-fill" id="scrubFill"></div>
+        <div id="scrubMarkers"></div>
+        <div class="scrub-playhead" id="scrubPlayhead"></div>
+      </div>
+    </div>
+    <div class="time-range">Oct 2 00:00 → Oct 6 23:59</div>
+    <div class="time-label" id="timeLabel">Oct 2, 00:00</div>
+  </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
