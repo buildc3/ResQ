@@ -381,21 +381,47 @@ async function nowcastPass() {
   check('nowcast map renders', await page.locator('#nowcastMapDiv canvas').count() > 0);
   check('layer toggle panel offers reflectivity/convergence/cooling/CI/hazard layers', await page.locator('input[name="nowcastLayer"]').count() === 5);
 
-  // Lead-time slider: T+0 shows no placeholder; anything past it must show
-  // the honest "not implemented yet" note rather than invented numbers.
+  // Lead-time slider: T+0 shows no placeholder.
   const leadSlider = page.locator('#leadTimeSlider');
   check('lead-time slider starts at T+0 with no forecast-pending note', await page.locator('#forecastPendingNote').isHidden());
-  await leadSlider.fill('6');
+
+  const track = page.locator('#scrubTrack');
+  const box = await track.boundingBox();
+
+  // Before the storm has any radar-identifiable (>=40dBZ) cell, WP5's
+  // baseline has nothing to extrapolate from — the note must say so
+  // honestly rather than fabricate a forecast.
+  await page.mouse.click(box.x + box.width * 0.352, box.y + box.height / 2); // ~Oct 3, 18:10 — before cell identification
+  await leadSlider.fill('3'); // T+30min
   await leadSlider.dispatchEvent('input');
-  await page.waitForTimeout(100);
-  check('lead-time slider past T+0 shows the forecast-not-implemented placeholder, not fabricated data', await page.locator('#forecastPendingNote').isVisible());
+  await page.waitForTimeout(150);
+  check('lead-time slider with no forecast available says so honestly, not fabricated data',
+    (await page.locator('#forecastPendingNote').innerText()).toLowerCase().includes('no forecast available'));
+
+  // Once the storm has a real identified cell, the same lead time must show
+  // an actual WP5 baseline forecast (cell tracking + advection) — a grid
+  // canvas re-render is not independently checkable here, but the note's
+  // own text and styling flip to "showing the forecast" is the DOM-visible
+  // proof this isn't just always saying "unavailable".
+  await page.mouse.click(box.x + box.width * 0.3796, box.y + box.height / 2); // ~Oct 3, 21:30 — storm has an identified cell by here
+  await page.waitForTimeout(150);
+  check('lead-time slider shows a real WP5 baseline forecast once the storm has an identifiable cell',
+    (await page.locator('#forecastPendingNote').innerText()).toLowerCase().includes('wp5 baseline forecast'));
+  check('forecast-active note is visually distinguished from the no-forecast note', await page.locator('#forecastPendingNote.forecast-active').count() === 1);
+
   await leadSlider.fill('0');
   await leadSlider.dispatchEvent('input');
 
+  // WP8: the forecast is scored against this scenario's own simulated
+  // future, and skill must visibly decay with lead time — never flat.
+  const verifyText = (await page.locator('#verificationPanel').innerText()).toLowerCase();
+  check('verification panel discloses it scores against simulated (not real-world) data', verifyText.includes('simulated'));
+  const csiValues = [...verifyText.matchAll(/csi (\d+)%/g)].map((m) => Number(m[1]));
+  check('verification panel shows CSI genuinely decaying with lead time, not flat/fabricated',
+    csiValues.length >= 4 && csiValues[0] > csiValues[csiValues.length - 1]);
+
   // Scrub to the storm's active window and confirm CI detection, TTI, and
   // the alert log all populate from real generated schedule data.
-  const track = page.locator('#scrubTrack');
-  const box = await track.boundingBox();
   await page.mouse.click(box.x + box.width * 0.352, box.y + box.height / 2); // ~Oct 3, 18:10 — just past CI detection
   await page.waitForTimeout(300);
   await page.screenshot({ path: shot('11-nowcast-ci-detected') });

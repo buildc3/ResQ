@@ -16,6 +16,8 @@ flowchart LR
     S["Simulated radar + satellite + lightning\n(reflectivity, IR cooling, convergence)"] --> CI{{"CI detector:\nrolling z-score per grid cell"}}
     CI -->|"cluster of cells confirms"| CASE(["Convective-initiation Case\n(before radar/lightning maturity)"])
     CASE --> HZ["Hazard zoning\n(current frame): cloudburst rain,\nhail proxy, downburst proxy, lightning density"]
+    CASE --> FC["WP5 baseline forecast:\ncell ID -> centroid tracking -> advection,\nT+10min...T+6h"]
+    FC --> SKILL["WP8 verification:\nPOD/FAR/CSI vs. lead time"]
     CASE --> TTI["Time-to-Impact\nfor named towns"]
     TTI --> ALERT(["In-app alert log\n(SMS-style message, not dispatched)"])
 ```
@@ -33,8 +35,10 @@ flowchart LR
 | Lightning strike density | Direct count of simulated flashes (not a proxy) | The flashes themselves are simulated |
 | Downstream GLOF flood TTI | Real formula (basin_km ÷ flood-wave speed), reused unchanged from the Response Module | — |
 | Storm-cell TTI | — | Computed from this simulated event's own known track/steering vector — not a general forecast, labeled as such in the UI |
-| Forecast lead time (T+10min…T+6h) | Grid + time-axis structure exists | **No forecast engine yet** — the lead-time slider shows an honest "not implemented" placeholder past T+0, never fabricated numbers |
+| Forecast lead time (T+10min…T+6h) | **WP5 baseline nowcast is real**: cell identification (≥40dBZ) → reflectivity-weighted centroid tracking → velocity + trend estimated only from observed history → advection extrapolation | Only reflectivity is forecast (not the other layers); genuinely has no data for most (base-frame, lead) pairs — the UI says so honestly rather than fabricating one |
+| Forecast skill (WP8) | **Real POD/FAR/CSI**, scored against this scenario's own simulated future | Scored against SIMULATED ground truth, not real-world observations — stated in the verification panel itself |
 | Real data-source adapters (INSAT, IMD DWR, lightning network) | Documented interface + schema (`web/pipeline/sources/`) | Stubs only — not wired to any live feed; access terms marked TO BE VERIFIED |
+| SMS alert dispatch | Documented Netlify Function stub (`web/netlify/functions/send-alert.mjs`), env-flag gated | Off by default everywhere, including deployed — no env vars are set, and the frontend never calls it; the in-app Alert Log is what's actually live |
 
 ## How it's built
 
@@ -47,7 +51,7 @@ web/                Netlify-deployable npm project (netlify.toml's build base)
     sources/             documented real-data-adapter interface — stubs only, not wired
   data/                pipeline output (JSON) — regenerated fresh every build
   index.html/css/js    the frontend: vanilla HTML/CSS/JS + Leaflet, no framework
-  qa/                  headless-browser QA (Playwright) — 71 automated checks
+  qa/                  headless-browser QA (Playwright) — 77 automated checks
   README.md            architecture deep-dive: algorithms, data schema, UI wiring
 
 netlify.toml         build = "npm run build" (base: web) — Node only
@@ -61,10 +65,18 @@ netlify.toml         build = "npm run build" (base: web) — Node only
 - A small cluster of neighboring cells (≥3) must confirm together — the spatial equivalent of "multiple stations must agree."
 - On confirmation: a Case is created, with a live "detected N minutes before maturity" stat computed against the storm's own ground-truth maturity timestamp.
 
+### WP5 baseline forecast + WP8 verification
+
+- Cell identification: any grid cell reaching ≥40dBZ reflectivity in the observed data.
+- Centroid tracking: a reflectivity-weighted centroid computed fresh at each identified frame, from *observed* cells only — never from the simulator's own hidden ground-truth track (that field exists solely for the CI-lead-time proof and TTI, both already clearly labeled as reading known ground truth).
+- Velocity + trend: estimated from the two most recent identified frames only — a real baseline never knows the future, so it can't and doesn't peek at how the storm actually evolves next.
+- Extrapolation: shift the centroid by velocity × lead time, decay/grow peak intensity by the observed trend (clamped to a sane range), hold the footprint radius roughly constant — the "simple lifecycle growth/decay term" the brief calls for.
+- Verification: forecast cells (≥40dBZ) vs. the scenario's actual future cells at the same threshold, aggregated per lead time into POD/FAR/CSI. Skill genuinely decays — from ~55% CSI at T+10min down to 0% by around T+60min, because this particular simulated storm only lives ~2-3 hours, so a 6-hour-ahead forecast for it has nothing left to be right about by then. That's an honest property of a short-lived event, not a tuning failure.
+
 ### Frontend
 
-- Nowcast is the default view: a grid canvas layer (toggle between reflectivity, convergence, cloud-top cooling, CI probability, and current-frame hazard zoning), a Convective Initiation status panel, a Time-to-Impact panel per named town, and an in-app alert log.
-- The lead-time slider (T+0…T+6h) is honest about what doesn't exist yet — past T+0 it shows a "forecast engine not yet implemented" note, never invented numbers.
+- Nowcast is the default view: a grid canvas layer (toggle between reflectivity, convergence, cloud-top cooling, CI probability, and current-frame hazard zoning), a Convective Initiation status panel, a Time-to-Impact panel per named town, an in-app alert log, and a Forecast Verification panel.
+- The lead-time slider (T+0…T+6h) shows the real WP5 forecast when one exists for the current (base frame, lead) pair, and an honest "no forecast available" note otherwise — never a fabricated number either way.
 - Response Module (station map, cloudburst/earthquake cases, drone Phase 1-3) is one nav tab away, fully intact, clearly labeled legacy.
 - Accessible: colorblind-safe shape redundancy, full keyboard operability, `prefers-reduced-motion` support — carried over to every new control.
 
@@ -74,7 +86,7 @@ netlify.toml         build = "npm run build" (base: web) — Node only
 cd web
 npm install
 npm run dev   # generates data + runs detection, serves on http://localhost:8000
-npm run qa    # headless-browser QA pass (71 checks)
+npm run qa    # headless-browser QA pass (77 checks)
 ```
 
 - Deploy: push to a git remote, connect the repo in Netlify — `netlify.toml` handles the rest, no manual env vars needed.
@@ -82,11 +94,9 @@ npm run qa    # headless-browser QA pass (71 checks)
 
 ## Scope
 
-**Built (Milestone 1):** grid + time-axis structure, the simulated storm scenario, CI detection with a live before-maturity proof, current-frame hazard zoning (cloudburst/hail-proxy/downburst-proxy/lightning-density), downstream GLOF flood TTI (real) + storm-cell TTI (from simulated ground truth) + in-app alert log, and the full original Response Module (drone Detection → Connectivity → Relief), unchanged.
+**Built (Milestone 1 + WP5/WP8):** grid + time-axis structure, the simulated storm scenario, CI detection with a live before-maturity proof, current-frame hazard zoning (cloudburst/hail-proxy/downburst-proxy/lightning-density), the WP5 baseline forecast (cell ID → centroid tracking → advection extrapolation, T+10min…T+6h, observed-data-only — never peeks at ground truth), WP8 verification (real POD/FAR/CSI vs. lead time, scored against this scenario's own simulated future), downstream GLOF flood TTI (real) + storm-cell TTI (from simulated ground truth) + in-app alert log, a documented off-by-default SMS dispatch stub (`web/netlify/functions/send-alert.mjs`), and the full original Response Module (drone Detection → Connectivity → Relief), unchanged.
 
 **Deferred to a future milestone (documented, not built):**
-- General vision-based multi-frame cell tracking and a real 0-6h forecast engine that projects hazard fields forward with decaying skill (the lead-time slider's placeholder exists for this).
-- A verification panel (POD/FAR/CSI skill metrics vs. lead time).
-- Any ConvLSTM/U-Net model.
-- Live SMS dispatch (Twilio or otherwise) — the alert log is in-app only.
+- The *general* case of WP5 — real multi-frame vision-based object tracking (as opposed to the simple centroid-tracking baseline, which is done) — and any ConvLSTM/U-Net model; the brief only asks for the ML tier if it beats the baseline, and there's no real training data here to justify attempting it.
+- Live SMS dispatch actually reaching Twilio — the adapter stub exists and is env-flag gated, but the flag is unset everywhere by default, and the frontend never calls it.
 - Real INSAT/IMD-DWR/lightning-network data ingestion — `web/pipeline/sources/` documents the interface but every loader is a stub.

@@ -84,6 +84,7 @@ let GRID = null, GRID_CELL_LOOKUP = {};
 let CONV_FRAMES_BY_TS = {}, CI_FRAMES_BY_TS = {}, HAZARD_FRAMES_BY_TS = {};
 let CONV_LIGHTNING = [], CONV_GROUND_TRUTH = null, HAZARD_PARAMS = null, CI_CASE = null;
 let TTI_FLOOD = [], TTI_STORM = [], ALERT_LOG = [];
+let FORECAST_FRAMES_BY_KEY = {}, VERIFICATION = [];
 
 function rollingMedian(series, window=5){
   const half = Math.floor(window/2);
@@ -135,7 +136,8 @@ async function loadData(){
     return r.json();
   });
   const [stationsRes, cbFrames, eqFrames, cbStationProb, eqStationProb, cbRegional, eqRegional, cases, cbDamage, eqDamage,
-    grid, convFrames, convLightning, convGroundTruth, ciFrames, ciCase, hazardFrames, hazardParams, ttiFlood, ttiStorm, alertLog] = await Promise.all([
+    grid, convFrames, convLightning, convGroundTruth, ciFrames, ciCase, hazardFrames, hazardParams, ttiFlood, ttiStorm, alertLog,
+    forecastFrames, verification] = await Promise.all([
     fetchJson('stations.json'),
     fetchJson('cloudburst_frames.json'),
     fetchJson('earthquake_frames.json'),
@@ -157,6 +159,8 @@ async function loadData(){
     fetchJson('tti_flood.json'),
     fetchJson('tti_storm.json'),
     fetchJson('alert_log.json'),
+    fetchJson('forecast_frames.json'),
+    fetchJson('verification.json'),
   ]);
   STATIONS = stationsRes.stations;
   STATION_LOOKUP = Object.fromEntries(STATIONS.map(s=>[s.id, s]));
@@ -195,6 +199,13 @@ async function loadData(){
   TTI_FLOOD = ttiFlood;
   TTI_STORM = ttiStorm;
   ALERT_LOG = alertLog;
+
+  // WP5 baseline nowcast + WP8 verification. Forecasts are keyed by
+  // (base observed timestamp, lead minutes) — most (timestamp, lead) pairs
+  // have no entry at all, since a forecast only exists once the storm has
+  // an identifiable >=40dBZ cell to extrapolate from.
+  FORECAST_FRAMES_BY_KEY = Object.fromEntries(forecastFrames.map(f=>[f.base_timestamp+'|'+f.lead_minutes, f]));
+  VERIFICATION = verification;
 }
 
 /* ---------- SENSOR / RISK LOOKUPS ---------- */
@@ -447,8 +458,17 @@ const NOWCAST_LAYER_TOOLTIPS = {
 /** Builds cell_id -> value for whichever layer is currently selected, from
  *  whichever sparse per-timestamp frame table backs it — an empty/missing
  *  frame (the overwhelming majority of the 720-frame timeline, since the
- *  storm is only active for ~35 frames) correctly means "nothing here". */
-function computeGridLayerValues(currentIso, layer){
+ *  storm is only active for ~35 frames) correctly means "nothing here".
+ *  leadMinutes>0 switches to the WP5 baseline forecast (reflectivity only —
+ *  that's the only field the baseline extrapolates) instead of the observed
+ *  layer; a missing (timestamp, lead) entry there just as correctly means
+ *  "no forecast available from this base frame", not an error. */
+function computeGridLayerValues(currentIso, layer, leadMinutes){
+  if(leadMinutes){
+    const frame = FORECAST_FRAMES_BY_KEY[currentIso+'|'+leadMinutes];
+    if(!frame) return {};
+    return Object.fromEntries(frame.cells.map(c=>[c.cell_id, c.reflectivity_dbz]));
+  }
   if(layer==='hazard'){
     const frame = HAZARD_FRAMES_BY_TS[currentIso];
     if(!frame) return {};
@@ -482,6 +502,7 @@ function createGridCanvas(map){
   let layer = 'reflectivity';
   let values = {};
   let visible = true;
+  let forecastMode = false;
 
   function resize(){
     const size = map.getSize();
@@ -490,6 +511,7 @@ function createGridCanvas(map){
   }
 
   function cellColor(cellId, v){
+    if(forecastMode){ const [r,g,b] = rampColor(REFLECTIVITY_STOPS, v/REFLECTIVITY_MAX_DBZ); return `rgba(${r},${g},${b},0.6)`; }
     if(layer==='hazard'){
       if(v.zone==='red') return 'rgba(201,48,44,0.55)';
       if(v.zone==='yellow') return 'rgba(184,121,11,0.5)';
@@ -524,6 +546,7 @@ function createGridCanvas(map){
     setLayer(name){ layer = name; redraw(); },
     setValues(v){ values = v; redraw(); },
     setVisible(v){ visible = v; if(v) redraw(); else { ctx.clearRect(0,0,canvas.width,canvas.height); } },
+    setForecastMode(v){ forecastMode = v; redraw(); },
     redraw,
   };
 }
@@ -531,6 +554,7 @@ function createGridCanvas(map){
 /* ---------- NOWCAST MAP ---------- */
 let nowcastMap, nowcastGridCanvas, nowcastTownMarkers = {}, nowcastCentroidMarker = null, nowcastLightningLayer = null;
 let nowcastCurrentLayer = 'reflectivity';
+let nowcastLeadMinutes = 0; // 0 = observed (T+0); >0 = WP5 baseline forecast
 
 function buildNowcastMap(){
   if(!GRID) return;
@@ -553,13 +577,16 @@ function buildNowcastMap(){
 
 function updateNowcastMap(currentIso){
   if(!nowcastMap) return;
-  const values = computeGridLayerValues(currentIso, nowcastCurrentLayer);
+  nowcastGridCanvas.setForecastMode(nowcastLeadMinutes > 0);
+  const values = computeGridLayerValues(currentIso, nowcastCurrentLayer, nowcastLeadMinutes);
   nowcastGridCanvas.setValues(values);
 
   // Storm centroid marker — from the ground-truth track, honestly the
   // simulated event's own known position, not a general tracking output.
+  // Only meaningful for the observed (T+0) frame — hidden during forecast
+  // mode rather than showing a stale "current" position under a future grid.
   const track = (CONV_GROUND_TRUTH && CONV_GROUND_TRUTH.track) || [];
-  const trackPoint = track.find(p=>p.time===currentIso);
+  const trackPoint = nowcastLeadMinutes === 0 ? track.find(p=>p.time===currentIso) : null;
   if(trackPoint){
     nowcastCentroidMarker.setLatLng([trackPoint.centroid_lat, trackPoint.centroid_lon]);
     nowcastCentroidMarker.setStyle({opacity:1});
@@ -631,6 +658,40 @@ function renderNowcastView(currentIso){
   renderCIStatusPanel(currentIso);
   renderTTIPanel(currentIso);
   renderAlertLogPanel(currentIso);
+  renderLeadTimeNote(currentIso);
+}
+
+/** Tells the truth about whether a forecast actually exists for the
+ *  currently-selected (base frame, lead time) pair — most of the time,
+ *  it doesn't, either because we're not near the storm yet, or because the
+ *  lead time reaches past the point where the real simulated event has
+ *  already fully decayed (a short-lived storm genuinely can't be forecast
+ *  6 hours out with any skill — see the verification panel). */
+function renderLeadTimeNote(currentIso){
+  const note = document.getElementById('forecastPendingNote');
+  if(!note) return;
+  if(nowcastLeadMinutes === 0){ note.hidden = true; return; }
+  const hasForecast = !!FORECAST_FRAMES_BY_KEY[currentIso+'|'+nowcastLeadMinutes];
+  note.hidden = false;
+  note.textContent = hasForecast
+    ? `Showing the WP5 baseline forecast (cell tracking + advection), not observed data.`
+    : `No forecast available from this point in time — either too early, or beyond where this short-lived simulated storm has any real skill left (see Forecast Verification).`;
+  note.classList.toggle('forecast-active', hasForecast);
+}
+
+function renderVerificationPanel(){
+  const el = document.getElementById('verificationPanel'); if(!el || !VERIFICATION.length) return;
+  const showLeads = [10, 30, 60, 120, 180, 360];
+  const rows = showLeads.map(lead=>{
+    const s = VERIFICATION.find(v=>v.lead_minutes===lead);
+    if(!s) return '';
+    const pct = (x)=> Math.round(x*100)+'%';
+    return `<div class="verify-row"><span>T+${lead}min</span><span>POD ${pct(s.pod)}</span><span>FAR ${pct(s.far)}</span><span class="verify-csi">CSI ${pct(s.csi)}</span></div>`;
+  }).join('');
+  el.innerHTML = `
+    <p class="verify-note">Scored against this scenario's own SIMULATED future — not real-world data. Skill decays with lead time by design; it drops to zero once this short-lived (~2-3h) storm has already dissipated in reality, which a 6-hour-ahead forecast for it honestly can't avoid.</p>
+    <div class="verify-header"><span>Lead time</span><span>POD</span><span>FAR</span><span>CSI</span></div>
+    ${rows}`;
 }
 
 function initNowcastUI(){
@@ -648,22 +709,19 @@ function initNowcastUI(){
   });
 
   // Lead-time slider: T+0 is the live observed frame this app already
-  // computes everywhere else; T>0 is a structural placeholder only — no
-  // forecast engine exists yet (see README "Deferred to next milestone"),
-  // so it must say so plainly rather than inventing numbers.
+  // computes everywhere else; T>0 now shows the real WP5 baseline forecast
+  // (cell ID + centroid tracking + advection extrapolation) when one exists
+  // for the current (base frame, lead) pair — see renderLeadTimeNote() for
+  // the honest "no forecast available" case, which is common and expected.
   const slider = document.getElementById('leadTimeSlider');
   const valueEl = document.getElementById('leadTimeValue');
-  const pendingNote = document.getElementById('forecastPendingNote');
   slider.addEventListener('input', ()=>{
-    const minutes = Number(slider.value)*10;
-    if(minutes===0){
-      valueEl.textContent = 'T+0 (live)';
-      pendingNote.hidden = true;
-    } else {
-      valueEl.textContent = `T+${minutes}min`;
-      pendingNote.hidden = false;
-    }
+    nowcastLeadMinutes = Number(slider.value)*10;
+    valueEl.textContent = nowcastLeadMinutes===0 ? 'T+0 (live)' : `T+${nowcastLeadMinutes}min`;
+    render();
   });
+
+  renderVerificationPanel();
 }
 
 /* ---------- LEAFLET MAP ---------- */

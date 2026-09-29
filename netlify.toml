@@ -3,6 +3,13 @@
   publish = "."
   command = "npm run build"
 
+[functions]
+  # Documented STUB only (web/netlify/functions/send-alert.mjs) for real SMS
+  # dispatch — not wired into the frontend, and off by default even if
+  # deployed, since none of its required env vars are set here. See the
+  # function's own header comment for what real wiring would need.
+  directory = "netlify/functions"
+
 [build.environment]
   # Pin to what's actually been tested, rather than whatever Netlify's
   # platform default happens to be.

@@ -122,7 +122,15 @@ header.topbar{display:flex;align-items:center;gap:24px;padding:0 20px;height:52p
 #leadTimeSlider{flex:1;max-width:280px;accent-color:var(--accent);cursor:pointer}
 .lead-time-value{font-family:var(--mono);font-size:12px;color:var(--text);white-space:nowrap;min-width:90px}
 .forecast-pending{font-size:11.5px;color:var(--amber);background:oklch(93% 0.05 70);padding:4px 10px;border-radius:5px;white-space:nowrap}
+.forecast-pending.forecast-active{color:var(--accent);background:var(--accent-dim)}
 @media (max-width:760px){.forecast-pending{white-space:normal}}
+
+.verification-panel{padding:12px 14px;font-size:12px}
+.verify-note{color:var(--text-faint);font-size:11px;line-height:1.5;margin:0 0 10px}
+.verify-header,.verify-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;padding:5px 0;font-family:var(--mono);font-size:10.5px}
+.verify-header{color:var(--text-faint);text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border-soft);font-size:9.5px}
+.verify-row{border-bottom:1px solid var(--border-soft);color:var(--text-dim)}
+.verify-csi{color:var(--text);font-weight:700}
 
 .ci-status-panel,.tti-panel,.alert-log-panel{padding:12px 14px;font-size:12.5px}
 .ci-pending{color:var(--text-faint);font-size:12px;line-height:1.5}

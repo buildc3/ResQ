@@ -20,6 +20,8 @@ import { runCIDetection } from './ciDetection.js';
 import { buildHazardFrames, HAZARD_PARAMS } from './hazards.js';
 import { buildFloodTTI, buildStormTTI } from './tti.js';
 import { buildConvectiveCase } from './cases.js';
+import { buildForecastFrames } from './forecast.js';
+import { buildVerification } from './verification.js';
 
 function relayDeployMap(relays: RelayDeployment[]): Record<string, string> {
   return Object.fromEntries(relays.map((r) => [r.station_id, r.deploy_at]));
@@ -152,6 +154,19 @@ function main() {
   writeJson('tti_storm.json', stormTTI.tti);
   writeJson('alert_log.json', stormTTI.alerts);
   console.log(`  wrote ${stormTTI.alerts.length} alert log entrie(s)`);
+
+  console.log('Building WP5 baseline nowcast (cell ID + centroid tracking + advection extrapolation)...');
+  const forecastFrames = buildForecastFrames(conv.frames);
+  writeJson('forecast_frames.json', forecastFrames);
+  console.log(`  wrote ${forecastFrames.length} forecast (base, lead) pair(s)`);
+
+  console.log('Scoring the baseline nowcast against simulated ground truth (WP8)...');
+  const skill = buildVerification(forecastFrames, conv.frames);
+  writeJson('verification.json', skill);
+  const csiAt10 = skill.find((s) => s.lead_minutes === 10)?.csi ?? 0;
+  const csiAt60 = skill.find((s) => s.lead_minutes === 60)?.csi ?? 0;
+  const csiAt180 = skill.find((s) => s.lead_minutes === 180)?.csi ?? 0;
+  console.log(`  CSI: T+10min=${csiAt10} T+60min=${csiAt60} T+180min=${csiAt180}`);
 }
 
 main();

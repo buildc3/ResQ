@@ -36,6 +36,8 @@ web/
 | `ciDetection.ts` | SIH26084: convective-initiation detection — rolling z-score → adaptive per-cell threshold → sigmoid → spatial-cluster confirmation, reusing `mathUtils.ts`'s exact functions and `cloudburst.ts`'s calibration pattern |
 | `hazards.ts` | SIH26084: current-frame hazard zoning — cloudburst rain rate (Z-R relation), hail/downburst PROXY heuristics, lightning density, Red/Yellow/nominal zoning |
 | `tti.ts` | SIH26084: Time-to-Impact — downstream GLOF flood TTI (real, reused from `cloudburst.ts`'s own formula) + storm-cell TTI (from the simulated event's ground truth) + in-app alert log entries |
+| `forecast.ts` | SIH26084 WP5 (baseline, the brief's "must have" tier): cell identification (≥40dBZ), reflectivity-weighted centroid tracking, and advection extrapolation to T+10min…T+6h — reads only *observed* per-frame cell data, never `convection.ts`'s ground-truth track, so it's a genuine forecast rather than a lookup |
+| `verification.ts` | SIH26084 WP8: scores `forecast.ts`'s output against this scenario's own real simulated future, per lead time — POD/FAR/CSI |
 | `sources/` | SIH26084: documented real-data-adapter interface (INSAT IR, IMD DWR, lightning network) — **stubs only**, not wired to any live feed; see file-level comments for access-terms verification status |
 | `build.ts` | Orchestrator — runs both legacy scenarios plus the convective nowcast scenario, writes all JSON straight into `data/` |
 
@@ -67,6 +69,8 @@ The repo root has a `netlify.toml`:
 ```
 Connect the repo in Netlify — `npm install && npm run build` runs entirely on Node (no Python, no other language runtime, no external data source). Push to the connected branch to redeploy; the data regenerates fresh every time from the pipeline source, deterministically (same seeds → same output).
 
+`netlify.toml` also declares `netlify/functions` as the Functions directory, for one documented stub (`web/netlify/functions/send-alert.mjs`) — a real-SMS-dispatch integration point that requires four env vars to even attempt anything, none of which are set by this repo. Deploying as-is leaves it permanently a no-op; see the function's own header comment for what real wiring would need.
+
 ## SIH26084 convective nowcast — how the UI is wired
 
 - **Shared timeline**: `convection_frames.json` is generated on the exact same 720-frame, 10-minute grid as `cloudburst_frames.json`/`earthquake_frames.json` — `FRAME_ISO[state.frameIndex]` drives the Nowcast view with zero extra bookkeeping.
@@ -77,6 +81,8 @@ Connect the repo in Netlify — `npm install && npm run build` runs entirely on 
 - **Alert log**: `alert_log.json` entries reveal in-app the instant their `issued_at` timestamp passes, using the SIH26084 brief's exact SMS template text. Nothing is actually dispatched — there is no Twilio call, no backend, no phone number on file.
 - **Lead-time slider honesty**: `#leadTimeSlider` (0-36, ×10min) is real UI, but only T+0 has real data behind it. Moving past T+0 shows `#forecastPendingNote` ("Forecast engine not yet implemented") instead of any computed value — enforced in `initNowcastUI()` in `app.js`, not just a documentation promise.
 - **Response Module coexistence**: `switchView()` now also toggles the shared `#transportBar` (visible for Nowcast + Response Module, hidden for Cases/Case Detail) and calls `invalidateSize()` on whichever Leaflet map instance (`nowcastMap` or `leafMap`) just became visible — both maps are built eagerly at `init()` time, and Leaflet reports a 0×0 container for any map whose view was `display:none` at creation, so this call is load-bearing, not optional.
+- **WP5 baseline forecast**: `forecast_frames.json` is keyed by `(base_timestamp, lead_minutes)` — the frontend looks up `FRAME_ISO[state.frameIndex] + '|' + selectedLeadMinutes` directly (`FORECAST_FRAMES_BY_KEY` in `app.js`). A missing key is common and correct: it means either the storm has no identified (≥40dBZ) cell yet at that base frame, or the lead time reaches past where this short-lived storm has already dissipated in the real simulated future — `renderLeadTimeNote()` distinguishes the two honestly in the UI copy rather than showing one generic "no data" message. When a forecast does exist, `createGridCanvas`'s `setForecastMode(true)` forces the reflectivity color ramp regardless of which observed layer was previously selected, since reflectivity is the only field the baseline forecasts.
+- **WP8 verification panel**: `verification.json` is static (computed once at build time), so `renderVerificationPanel()` renders it once in `initNowcastUI()` rather than every render tick — it shows POD/FAR/CSI for a representative subset of lead times (10/30/60/120/180/360 min) with an explicit "scored against SIMULATED ground truth" disclosure line.
 
 ## How the Response Module UI is wired to real data
 
@@ -105,7 +111,7 @@ Timestamps are treated as plain fixed-width ISO strings throughout (never parsed
 ```
 npm run qa
 ```
-Runs a headless-Chromium (Playwright) pass against the real served app — 71 checks covering data load, every phase's live-update behavior, the speed control's actual timing, accessibility (keyboard operability, colorblind-safe indicators), the onboarding/story mode, error states, and the SIH26084 Nowcast view (layer toggles, the lead-time slider's honest placeholder, CI detection, TTI, alert log — plus a regression check that the Response Module is still fully reachable and unmodified). See inline comments in `qa/smoke-test.mjs` for exactly what's checked. Screenshots land in `qa/shots/` (gitignored).
+Runs a headless-Chromium (Playwright) pass against the real served app — 77 checks covering data load, every phase's live-update behavior, the speed control's actual timing, accessibility (keyboard operability, colorblind-safe indicators), the onboarding/story mode, error states, and the SIH26084 Nowcast view (layer toggles, CI detection, TTI, alert log, the WP5 baseline forecast genuinely activating once the storm has an identifiable cell vs. honestly saying "no forecast available" otherwise, and WP8's verification panel showing CSI actually decay with lead time — plus a regression check that the Response Module is still fully reachable and unmodified). See inline comments in `qa/smoke-test.mjs` for exactly what's checked. Screenshots land in `qa/shots/` (gitignored).
 
 ## What happened to the Python pipeline?
 
