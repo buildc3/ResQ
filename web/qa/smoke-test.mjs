@@ -34,7 +34,20 @@ async function desktopPass() {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) consoleIssues.push(`[${m.type()}] ${m.text()}`); });
   page.on('pageerror', (e) => pageErrors.push(e.stack || e.message));
-  page.on('requestfailed', (r) => consoleIssues.push(`[requestfailed] ${r.url()} - ${r.failure()?.errorText}`));
+  page.on('requestfailed', (r) => {
+    // ERR_ABORTED specifically on OpenStreetMap tile requests is expected,
+    // benign noise: switching into a view whose Leaflet map was built while
+    // hidden (0x0 container) makes its first fitBounds() land on a wrong
+    // zoom/center, which switchView() immediately corrects with a second
+    // fitBounds() once the container has a real size — Leaflet cancels the
+    // now-irrelevant in-flight tile fetches from the first (wrong) view as
+    // part of that correction. A real browser does this invisibly; only
+    // Playwright's request-failure listener notices at all. A genuinely
+    // broken request (a 404, a real network failure, our own data/*.json
+    // failing) is not an abort and is still caught below.
+    const isBenignTileAbort = r.url().includes('tile.openstreetmap.org') && r.failure()?.errorText === 'net::ERR_ABORTED';
+    if (!isBenignTileAbort) consoleIssues.push(`[requestfailed] ${r.url()} - ${r.failure()?.errorText}`);
+  });
 
   await page.goto(BASE, { waitUntil: 'networkidle' });
   await page.waitForSelector('#loadingOverlay[hidden]', { timeout: 5000 }).catch(() => {});

@@ -579,10 +579,13 @@ let nowcastMap, nowcastGridCanvas, nowcastTownMarkers = {}, nowcastCentroidMarke
 let nowcastCurrentLayer = 'reflectivity';
 let nowcastLeadMinutes = 0; // 0 = observed (T+0); >0 = WP5 baseline forecast
 
+let nowcastMapBounds = null; // stashed so switchView() can re-fit if this view is ever not the default
+
 function buildNowcastMap(){
   if(!GRID) return;
   nowcastMap = L.map('nowcastMapDiv', {zoomControl:true, attributionControl:true, scrollWheelZoom:true});
-  nowcastMap.fitBounds([[GRID.bounds.lat_min, GRID.bounds.lon_min],[GRID.bounds.lat_max, GRID.bounds.lon_max]]);
+  nowcastMapBounds = [[GRID.bounds.lat_min, GRID.bounds.lon_min],[GRID.bounds.lat_max, GRID.bounds.lon_max]];
+  nowcastMap.fitBounds(nowcastMapBounds);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'&copy; OpenStreetMap contributors', maxZoom:14}).addTo(nowcastMap);
 
   nowcastGridCanvas = createGridCanvas(nowcastMap);
@@ -754,13 +757,21 @@ function initNowcastUI(){
 let leafMap, markerRefs = {}, epicenterMarker = null, riverLine = null;
 let damageHeat = null, damageLayerVisible = true;
 
+let leafMapBounds = null; // stashed so switchView() can re-fit once the container has a real size
+
 function buildMap(){
   const lats = STATIONS.map(s=>s.lat), lons = STATIONS.map(s=>s.lon);
   const latMin = Math.min(...lats), latMax = Math.max(...lats);
   const lonMin = Math.min(...lons), lonMax = Math.max(...lons);
 
   leafMap = L.map('mapDiv', {zoomControl:true, attributionControl:true, scrollWheelZoom:true});
-  leafMap.fitBounds([[latMin-0.06, lonMin-0.06],[latMax+0.06, lonMax+0.06]]);
+  leafMapBounds = [[latMin-0.06, lonMin-0.06],[latMax+0.06, lonMax+0.06]];
+  // buildMap() runs at init() time, while #view-monitor is display:none
+  // (Nowcast is the default view) — fitBounds computed against a 0x0
+  // container silently falls back to a whole-world view, and a later
+  // invalidateSize() alone does NOT re-run it. switchView() re-applies
+  // fitBounds every time this view actually becomes visible instead.
+  leafMap.fitBounds(leafMapBounds);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'&copy; OpenStreetMap contributors', maxZoom:14}).addTo(leafMap);
 
   // Damage heat map — driven by each station's own "tower reading", not a
@@ -1327,8 +1338,12 @@ function switchView(view){
   // (or last visible) while its view was display:none reports a 0x0
   // container until told otherwise, so re-check on every switch into a
   // view that holds one.
-  if(view==='monitor' && leafMap) setTimeout(()=>{ leafMap.invalidateSize(); render(); }, 0);
-  if(view==='nowcast' && nowcastMap) setTimeout(()=>{ nowcastMap.invalidateSize(); render(); }, 0);
+  // invalidateSize() alone only fixes Leaflet's pixel-size tracking — it
+  // does NOT recompute the zoom/center a fitBounds() call made against a
+  // 0x0 container got wrong in the first place, so that's re-applied here
+  // too every time the view actually becomes visible.
+  if(view==='monitor' && leafMap) setTimeout(()=>{ leafMap.invalidateSize(); if(leafMapBounds) leafMap.fitBounds(leafMapBounds); render(); }, 0);
+  if(view==='nowcast' && nowcastMap) setTimeout(()=>{ nowcastMap.invalidateSize(); if(nowcastMapBounds) nowcastMap.fitBounds(nowcastMapBounds); render(); }, 0);
 }
 
 /* ---------- CASES VIEW ---------- */
