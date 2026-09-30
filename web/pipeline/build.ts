@@ -17,7 +17,7 @@ import { buildPhase3Plan } from './phase3.js';
 import { GRID_CELLS, GRID_ROWS, GRID_COLS, GRID_LAT_MIN, GRID_LAT_MAX, GRID_LON_MIN, GRID_LON_MAX, LEAD_TIME_MINUTES } from './grid.js';
 import { runConvection } from './convection.js';
 import { runCIDetection } from './ciDetection.js';
-import { buildHazardFrames, HAZARD_PARAMS } from './hazards.js';
+import { buildHazardFrames, buildForecastHazardFrames, HAZARD_PARAMS } from './hazards.js';
 import { buildFloodTTI, buildStormTTI } from './tti.js';
 import { buildConvectiveCase } from './cases.js';
 import { buildForecastFrames } from './forecast.js';
@@ -159,6 +159,11 @@ function main() {
   const forecastFrames = buildForecastFrames(conv.frames);
   writeJson('forecast_frames.json', forecastFrames);
   console.log(`  wrote ${forecastFrames.length} forecast (base, lead) pair(s)`);
+
+  // WP6 (closing the gap): the same hazard classification applied to the
+  // forecast's projected reflectivity, so hazard zones genuinely project
+  // forward with lead time instead of only ever describing the present.
+  writeJson('forecast_hazard_frames.json', buildForecastHazardFrames(forecastFrames));
 
   console.log('Scoring the baseline nowcast against simulated ground truth (WP8)...');
   const skill = buildVerification(forecastFrames, conv.frames);

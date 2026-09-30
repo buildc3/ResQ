@@ -108,9 +108,10 @@
             <label class="layer-toggle"><input type="radio" name="nowcastLayer" value="ci">CI probability</label>
           </div>
           <div class="layer-toggle-group">
-            <div class="layer-toggle-group-label">Hazard zones <span class="sim-badge sim-badge-sm">current frame only</span></div>
+            <div class="layer-toggle-group-label">Hazard zones <span class="sim-badge sim-badge-sm">forecast-projected</span></div>
             <label class="layer-toggle"><input type="radio" name="nowcastLayer" value="hazard">Cloudburst / hail / downburst</label>
           </div>
+          <label class="layer-opacity">Opacity <input type="range" id="nowcastLayerOpacity" min="20" max="100" value="100" step="5"></label>
           <label class="layer-toggle-off"><input type="checkbox" id="nowcastLayerOff">Hide grid layer</label>
         </div>
       </div>

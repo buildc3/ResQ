@@ -84,7 +84,7 @@ let GRID = null, GRID_CELL_LOOKUP = {};
 let CONV_FRAMES_BY_TS = {}, CI_FRAMES_BY_TS = {}, HAZARD_FRAMES_BY_TS = {};
 let CONV_LIGHTNING = [], CONV_GROUND_TRUTH = null, HAZARD_PARAMS = null, CI_CASE = null;
 let TTI_FLOOD = [], TTI_STORM = [], ALERT_LOG = [];
-let FORECAST_FRAMES_BY_KEY = {}, VERIFICATION = [];
+let FORECAST_FRAMES_BY_KEY = {}, FORECAST_HAZARD_BY_KEY = {}, VERIFICATION = [];
 
 function rollingMedian(series, window=5){
   const half = Math.floor(window/2);
@@ -137,7 +137,7 @@ async function loadData(){
   });
   const [stationsRes, cbFrames, eqFrames, cbStationProb, eqStationProb, cbRegional, eqRegional, cases, cbDamage, eqDamage,
     grid, convFrames, convLightning, convGroundTruth, ciFrames, ciCase, hazardFrames, hazardParams, ttiFlood, ttiStorm, alertLog,
-    forecastFrames, verification] = await Promise.all([
+    forecastFrames, verification, forecastHazardFrames] = await Promise.all([
     fetchJson('stations.json'),
     fetchJson('cloudburst_frames.json'),
     fetchJson('earthquake_frames.json'),
@@ -161,6 +161,7 @@ async function loadData(){
     fetchJson('alert_log.json'),
     fetchJson('forecast_frames.json'),
     fetchJson('verification.json'),
+    fetchJson('forecast_hazard_frames.json'),
   ]);
   STATIONS = stationsRes.stations;
   STATION_LOOKUP = Object.fromEntries(STATIONS.map(s=>[s.id, s]));
@@ -205,6 +206,7 @@ async function loadData(){
   // have no entry at all, since a forecast only exists once the storm has
   // an identifiable >=40dBZ cell to extrapolate from.
   FORECAST_FRAMES_BY_KEY = Object.fromEntries(forecastFrames.map(f=>[f.base_timestamp+'|'+f.lead_minutes, f]));
+  FORECAST_HAZARD_BY_KEY = Object.fromEntries(forecastHazardFrames.map(f=>[f.base_timestamp+'|'+f.lead_minutes, f]));
   VERIFICATION = verification;
 }
 
@@ -452,7 +454,7 @@ const NOWCAST_LAYER_TOOLTIPS = {
   convergence: 'Simulated low-level wind convergence — air piling up near the surface, the classic precursor to a storm forming (feeds the updraft).',
   ir: 'Simulated satellite IR brightness temperature drop — a cooling cloud top means the storm is growing taller, another precursor ahead of radar maturity.',
   ci: 'Convective-initiation probability — this grid cell\'s own calibrated anomaly score for cooling + convergence, before the storm actually matures.',
-  hazard: 'Current-frame hazard zoning: red = a threshold exceeded (cloudburst rain rate, or hail/downburst proxy), yellow = elevated. Not projected forward — see the lead-time note.',
+  hazard: 'Hazard zoning: red = a threshold exceeded (cloudburst rain rate, or hail/downburst proxy), yellow = elevated. Drag the lead-time slider to see this projected forward with the WP5 forecast — lightning density is the one part that never is.',
 };
 
 /** Builds cell_id -> value for whichever layer is currently selected, from
@@ -465,6 +467,18 @@ const NOWCAST_LAYER_TOOLTIPS = {
  *  "no forecast available from this base frame", not an error. */
 function computeGridLayerValues(currentIso, layer, leadMinutes){
   if(leadMinutes){
+    // Hazard zones are forecast too (WP6): the exact same rain-rate/hail/
+    // downburst/zone classification is applied to the forecast's projected
+    // reflectivity, so a red zone can genuinely appear ahead of time, not
+    // just describe the present moment. Lightning density isn't part of
+    // this — the baseline forecast only ever projects reflectivity.
+    if(layer==='hazard'){
+      const frame = FORECAST_HAZARD_BY_KEY[currentIso+'|'+leadMinutes];
+      if(!frame) return {};
+      const out = {};
+      frame.cells.forEach(c=>{ if(c.zone!=='nominal') out[c.cell_id] = c; });
+      return out;
+    }
     const frame = FORECAST_FRAMES_BY_KEY[currentIso+'|'+leadMinutes];
     if(!frame) return {};
     return Object.fromEntries(frame.cells.map(c=>[c.cell_id, c.reflectivity_dbz]));
@@ -503,6 +517,7 @@ function createGridCanvas(map){
   let values = {};
   let visible = true;
   let forecastMode = false;
+  let opacity = 1;
 
   function resize(){
     const size = map.getSize();
@@ -511,12 +526,17 @@ function createGridCanvas(map){
   }
 
   function cellColor(cellId, v){
-    if(forecastMode){ const [r,g,b] = rampColor(REFLECTIVITY_STOPS, v/REFLECTIVITY_MAX_DBZ); return `rgba(${r},${g},${b},0.6)`; }
-    if(layer==='hazard'){
+    // A hazard-shaped value (an object with a `zone`) is unambiguous on its
+    // own — true whether it came from the observed path or the forecast
+    // path (computeGridLayerValues returns the same shape either way), so
+    // this check comes before the forecastMode reflectivity-ramp override
+    // below, not after it.
+    if(v && typeof v==='object'){
       if(v.zone==='red') return 'rgba(201,48,44,0.55)';
       if(v.zone==='yellow') return 'rgba(184,121,11,0.5)';
       return null;
     }
+    if(forecastMode){ const [r,g,b] = rampColor(REFLECTIVITY_STOPS, v/REFLECTIVITY_MAX_DBZ); return `rgba(${r},${g},${b},0.6)`; }
     if(layer==='reflectivity'){ const [r,g,b] = rampColor(REFLECTIVITY_STOPS, v/REFLECTIVITY_MAX_DBZ); return `rgba(${r},${g},${b},0.6)`; }
     if(layer==='convergence'){ const [r,g,b] = rampColor(CONVERGENCE_STOPS, v/CONVERGENCE_MAX_MS); return `rgba(${r},${g},${b},0.55)`; }
     if(layer==='ir'){ const [r,g,b] = rampColor(COOLING_STOPS, v/COOLING_MAX_K); return `rgba(${r},${g},${b},0.55)`; }
@@ -528,6 +548,7 @@ function createGridCanvas(map){
     resize();
     ctx.clearRect(0,0,canvas.width,canvas.height);
     if(!visible || !GRID) return;
+    ctx.globalAlpha = opacity;
     const half = { lat: GRID.cells.length ? (GRID.bounds.lat_max-GRID.bounds.lat_min)/GRID.rows/2 : 0,
                     lon: GRID.cells.length ? (GRID.bounds.lon_max-GRID.bounds.lon_min)/GRID.cols/2 : 0 };
     Object.entries(values).forEach(([cellId, v])=>{
@@ -538,6 +559,7 @@ function createGridCanvas(map){
       ctx.fillStyle = color;
       ctx.fillRect(Math.min(p1.x,p2.x), Math.min(p1.y,p2.y), Math.abs(p2.x-p1.x)+1, Math.abs(p2.y-p1.y)+1);
     });
+    ctx.globalAlpha = 1;
   }
 
   map.on('move zoom resize', redraw);
@@ -547,6 +569,7 @@ function createGridCanvas(map){
     setValues(v){ values = v; redraw(); },
     setVisible(v){ visible = v; if(v) redraw(); else { ctx.clearRect(0,0,canvas.width,canvas.height); } },
     setForecastMode(v){ forecastMode = v; redraw(); },
+    setOpacity(v){ opacity = v; redraw(); },
     redraw,
   };
 }
@@ -706,6 +729,9 @@ function initNowcastUI(){
   });
   document.getElementById('nowcastLayerOff').addEventListener('change', (e)=>{
     nowcastGridCanvas.setVisible(!e.target.checked);
+  });
+  document.getElementById('nowcastLayerOpacity').addEventListener('input', (e)=>{
+    nowcastGridCanvas.setOpacity(Number(e.target.value)/100);
   });
 
   // Lead-time slider: T+0 is the live observed frame this app already
@@ -1041,6 +1067,31 @@ function initTransport(){
 const STORY_TARGET_SECONDS = 50;
 function buildStoryEvents(){
   const events = [];
+
+  // SIH26084 Nowcast narrative (primary) — real timestamps from the
+  // convective scenario, same "never scripted" discipline as everything
+  // else here.
+  if(CONV_GROUND_TRUTH){
+    events.push({at:CONV_GROUND_TRUTH.initiation_at, icon:'🌥', text:'Cloud-top cooling and low-level convergence begin over the upper Teesta — the precursor signs of a storm forming.'});
+  }
+  if(CI_CASE){
+    events.push({at:CI_CASE.detected_at, icon:'⚡', text:`Convective initiation confirmed — ${CI_CASE.lead_minutes_before_maturity} minutes before the storm actually matures.`});
+  }
+  if(CONV_GROUND_TRUTH){
+    events.push({at:CONV_GROUND_TRUTH.maturity_at, icon:'🌩', text:'Storm reaches radar/lightning maturity — exactly the point the CI detector got ahead of.'});
+  }
+  const firstRedFrame = Object.values(HAZARD_FRAMES_BY_TS).find(f=>f.cells.some(c=>c.zone==='red'));
+  if(firstRedFrame){
+    events.push({at:firstRedFrame.timestamp, icon:'🟥', text:'Cloudburst rain-rate threshold exceeded — a red hazard zone appears on the grid.'});
+  }
+  if(ALERT_LOG.length){
+    const firstAlert = ALERT_LOG.reduce((a,b)=> a.issued_at<b.issued_at ? a:b);
+    const townName = (STATION_LOOKUP[firstAlert.station_id]||{}).name || firstAlert.station_id;
+    events.push({at:firstAlert.issued_at, icon:'🚨', text:`First CRITICAL ALERT issued — ${townName} in the storm's path within ${firstAlert.minutes} minutes.`});
+  }
+
+  // Legacy Response Module narrative continues below — same real per-case
+  // schedule data as before.
   CASES.forEach(c=>{
     const label = DISASTER_LABEL[c.disaster_type] || c.disaster_type;
     events.push({at:c.detected_at, icon:'⚠', text:`${label} detected near ${c.location.region_label} — Case ${c.case_id} opens.`});
@@ -1104,7 +1155,7 @@ function checkStoryEvents(currentIso){
 function startStoryMode(){
   state.storyMode = true;
   state.storyNextIdx = 0;
-  switchView('monitor');
+  switchView('nowcast');
   setFrame(0);
   if(applySpeed) applySpeed((TOTAL_FRAMES-1)/(BASE_FPS_PER_X*STORY_TARGET_SECONDS));
   state.playing = true;

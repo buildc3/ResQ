@@ -1,9 +1,15 @@
 /**
- * SIH26084 hazard outputs, computed per grid cell for the CURRENT (observed)
- * frame only — Milestone 1 does not project these forward across the 0-6h
- * lead-time axis (that needs the general forecast engine, deferred; see
- * README "Deferred to next milestone").
+ * SIH26084 hazard outputs, computed per grid cell. Primarily for the
+ * CURRENT (observed) frame, but the same classification formulas are also
+ * applied to forecast.ts's projected reflectivity (see
+ * buildForecastHazardFrames below) — a forecast reflectivity value is
+ * classified through the identical rain-rate/hail/downburst/zone logic, so
+ * the hazard zones themselves genuinely project forward with the forecast
+ * rather than only ever describing the present moment. Lightning density
+ * is NOT forecast (the baseline only extrapolates reflectivity) — forecast
+ * hazard cells always report 0 for it, honestly.
  *
+
  * Cloudburst rainfall is derived from reflectivity via a named Z-R relation.
  * Hail probability and downburst velocity are explicitly labeled PROXY
  * heuristics — no public labelled hail/downburst dataset for India exists to
@@ -22,6 +28,7 @@
  */
 import { GRID_CELLS } from './grid.js';
 import type { ConvectionFrame, LightningFlash } from './convection.js';
+import type { ForecastFrame } from './forecast.js';
 
 // Z = A * R^b  =>  R = (Z/A)^(1/b), with Z in linear units (mm^6/m^3), not dBZ.
 const ZR_A = 200;
@@ -71,27 +78,30 @@ export interface HazardFrame { timestamp: string; cells: HazardCell[] }
 
 const CELL_AREA_KM2 = 1.5 * 1.5; // matches grid.ts's ~1.5km cell size
 
+/** The one place reflectivity turns into a hazard classification — shared
+ *  by the observed-frame path and the forecast path below, so a forecast
+ *  reflectivity value is judged by exactly the same rules a real one would be. */
+function classifyReflectivity(dbz: number): Omit<HazardCell, 'cell_id' | 'lightning_flash_density_per_km2_10min'> {
+  const rainRate = reflectivityDbzToRainRateMmHr(dbz);
+  const hailP = hailProbabilityProxy(dbz);
+  const downburstKmh = downburstVelocityProxyKmh(dbz);
+  let zone: ZoneLevel = 'nominal';
+  if (rainRate >= CLOUDBURST_RAIN_RATE_MM_HR || hailP > 0.6 || downburstKmh > 60) zone = 'red';
+  else if (rainRate >= ELEVATED_RAIN_RATE_MM_HR || hailP > 0.3 || downburstKmh > 30) zone = 'yellow';
+  return {
+    rain_rate_mm_hr: Math.round(rainRate * 10) / 10,
+    hail_probability_proxy: Math.round(hailP * 1000) / 1000,
+    downburst_velocity_proxy_kmh: downburstKmh,
+    zone,
+  };
+}
+
 export function buildHazardFrames(convectionFrames: ConvectionFrame[], lightning: LightningFlash[]): HazardFrame[] {
   const cellById = Object.fromEntries(GRID_CELLS.map((c) => [c.id, c]));
   return convectionFrames.map((frame) => {
     const cells: HazardCell[] = frame.cells
       .filter((c) => cellById[c.cell_id]) // guard against any stale ids
-      .map((c) => {
-        const rainRate = reflectivityDbzToRainRateMmHr(c.reflectivity_dbz);
-        const hailP = hailProbabilityProxy(c.reflectivity_dbz);
-        const downburstKmh = downburstVelocityProxyKmh(c.reflectivity_dbz);
-        let zone: ZoneLevel = 'nominal';
-        if (rainRate >= CLOUDBURST_RAIN_RATE_MM_HR || hailP > 0.6 || downburstKmh > 60) zone = 'red';
-        else if (rainRate >= ELEVATED_RAIN_RATE_MM_HR || hailP > 0.3 || downburstKmh > 30) zone = 'yellow';
-        return {
-          cell_id: c.cell_id,
-          rain_rate_mm_hr: Math.round(rainRate * 10) / 10,
-          hail_probability_proxy: Math.round(hailP * 1000) / 1000,
-          downburst_velocity_proxy_kmh: downburstKmh,
-          lightning_flash_density_per_km2_10min: 0, // filled in below
-          zone,
-        };
-      });
+      .map((c) => ({ cell_id: c.cell_id, lightning_flash_density_per_km2_10min: 0, ...classifyReflectivity(c.reflectivity_dbz) }));
     return { timestamp: frame.timestamp, cells };
   }).map((frame, i, all) => {
     // Lightning density: flashes within this 10-min frame window, per km^2,
@@ -119,6 +129,21 @@ export function buildHazardFrames(convectionFrames: ConvectionFrame[], lightning
         : c),
     };
   });
+}
+
+export interface ForecastHazardFrame { base_timestamp: string; lead_minutes: number; cells: (HazardCell & { lightning_flash_density_per_km2_10min: 0 })[] }
+
+/** Forecast-projected hazard zoning (closes the WP6 gap: the brief asks for
+ *  these four outputs "per cell, per lead time", not just for the current
+ *  frame) — classifies forecast.ts's projected reflectivity through the
+ *  identical rules as the observed path. Lightning density is always 0
+ *  here since the baseline forecast doesn't project it. */
+export function buildForecastHazardFrames(forecastFrames: ForecastFrame[]): ForecastHazardFrame[] {
+  return forecastFrames.map((f) => ({
+    base_timestamp: f.base_timestamp,
+    lead_minutes: f.lead_minutes,
+    cells: f.cells.map((c) => ({ cell_id: c.cell_id, lightning_flash_density_per_km2_10min: 0 as const, ...classifyReflectivity(c.reflectivity_dbz) })),
+  }));
 }
 
 export const HAZARD_PARAMS = {
