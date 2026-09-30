@@ -63,7 +63,7 @@ const state = {
   // CB_FRAMES[frameFloat] would silently return undefined for a fractional
   // key, so lookups must never use it directly.
   frameIndex: 0, frameFloat: 0, playing:false, speed:1, selectedStation:null,
-  currentView:'monitor', lastTs:null, revealedCases: new Set(),
+  currentView:'nowcast', lastTs:null, revealedCases: new Set(),
   openCaseId: null, activeDetailTab: 'p1',
   storyMode:false, storyEvents: [], storyNextIdx: 0,
   ciCaseRevealed:false,
@@ -110,6 +110,37 @@ function parseIso(iso){
 function formatLabel(iso){
   const t = parseIso(iso);
   return `${MONTH_NAMES[t.mo-1]} ${t.d}, ${String(t.h).padStart(2,'0')}:${String(t.mi).padStart(2,'0')}`;
+}
+function formatRangeBound(iso){
+  const t = parseIso(iso);
+  return `${MONTH_NAMES[t.mo-1]} ${t.d} ${String(t.h).padStart(2,'0')}:${String(t.mi).padStart(2,'0')}`;
+}
+/* The full 720-frame timeline spans 5 simulated days because the Response
+   Module's later flood/earthquake cases need that room — but the storm
+   itself only lives a few hours, so quoting the full range on the Nowcast
+   view reads as misleading. This derives an honest sub-window straight from
+   the storm's own ground-truth track (padded ~90min either side) instead of
+   hardcoding a guessed window. */
+function nowcastWindowLabel(){
+  if(!CONV_GROUND_TRUTH || !CONV_GROUND_TRUTH.track || CONV_GROUND_TRUTH.track.length===0 || FRAME_ISO.length===0) return null;
+  const track = CONV_GROUND_TRUTH.track;
+  const firstIdx = FRAME_ISO.indexOf(track[0].time);
+  const lastIdx = FRAME_ISO.indexOf(track[track.length-1].time);
+  if(firstIdx===-1 || lastIdx===-1) return null;
+  const PAD_FRAMES = 9; // ~90min at 10-min resolution
+  const startIdx = Math.max(0, firstIdx-PAD_FRAMES);
+  const endIdx = Math.min(FRAME_ISO.length-1, lastIdx+PAD_FRAMES);
+  return `${formatRangeBound(FRAME_ISO[startIdx])} → ${formatRangeBound(FRAME_ISO[endIdx])} (storm window)`;
+}
+function updateTimeRangeLabel(){
+  const el = document.getElementById('timeRangeLabel');
+  if(!el || FRAME_ISO.length===0) return;
+  const fullRange = `${formatRangeBound(FRAME_ISO[0])} → ${formatRangeBound(FRAME_ISO[FRAME_ISO.length-1])}`;
+  if(state.currentView==='nowcast'){
+    el.textContent = nowcastWindowLabel() || fullRange;
+  } else {
+    el.textContent = fullRange;
+  }
 }
 function formatTimeOnly(iso){
   const t = parseIso(iso);
@@ -1328,6 +1359,7 @@ function switchView(view){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.toggle('active', t.dataset.view===view));
   document.getElementById('view-'+view).classList.add('active');
+  updateTimeRangeLabel();
 
   // Shared transport bar: both Nowcast and Response Module play back the
   // same 720-frame timeline; Cases/Case Detail have no timeline of their own.
@@ -1851,6 +1883,7 @@ async function init(){
     initNowcastUI();
     initStoryUI();
     renderCasesView();
+    updateTimeRangeLabel();
     render();
     requestAnimationFrame(tick);
     loadingOverlay.hidden = true;
